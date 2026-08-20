@@ -87,7 +87,7 @@ button {
 
 <div id="status"></div>
 
-<h3 id="roundText">Round: 0</h3>
+<h3 id="roundText">Rounds: 0</h3>
 
 <div id="dashboard"></div>
 
@@ -101,18 +101,12 @@ let multipliers = [
 
 let entries = [];
 
-const probabilityMap = {
-200:200,300:300,400:400,500:500,600:600,700:700,
-800:800,900:900,1000:1000,1500:1500,2000:2000,
-3000:3000,4000:4000,5000:5000
-};
-
 function save(){
-  localStorage.setItem("limbo_v12", JSON.stringify(entries));
+  localStorage.setItem("limbo_v13", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v12");
+  let data = localStorage.getItem("limbo_v13");
   if(data) entries = JSON.parse(data);
 }
 
@@ -141,9 +135,10 @@ function deleteLast(){
   render();
 }
 
+/* BUILD STATS */
 function buildStats(){
   let data = {};
-  let current = entries.length; // IMPORTANT FIX: rounds = entries count
+  let rounds = entries.length; // FIXED ROUND COUNT
 
   multipliers.forEach(m=>{
     data[m] = {hits:0};
@@ -157,10 +152,10 @@ function buildStats(){
     });
   });
 
-  return {data,current};
+  return {data, rounds};
 }
 
-/* FIXED HEAT MODEL */
+/* FIXED HEAT LOGIC */
 function getHeat(hits, expected, rounds){
 
   let expectedHits = rounds / expected;
@@ -182,14 +177,14 @@ function getHeat(hits, expected, rounds){
 
 function render(){
 
-  let {data, current} = buildStats();
+  let {data, rounds} = buildStats();
 
-  document.getElementById("roundText").innerText = "Rounds: " + current;
+  document.getElementById("roundText").innerText = "Rounds: " + rounds;
 
   let html = "";
 
   multipliers.forEach(m=>{
-    let color = getHeat(data[m].hits, m, current);
+    let color = getHeat(data[m].hits, m, rounds);
 
     html += `
       <div class="cell">
@@ -204,10 +199,13 @@ function render(){
   let statsHTML = "";
 
   multipliers.forEach(m=>{
+    let expectedHits = rounds / m;
+
     statsHTML += `
       <div class="card">
         <b>${m}x</b><br>
         Hits: ${data[m].hits}<br>
+        Expected hits: ${expectedHits.toFixed(3)}<br>
         Expected: 1/${m}
       </div>
     `;
