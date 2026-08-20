@@ -49,10 +49,9 @@ button {
 .good { color: #22c55e; }
 .bad { color: #ef4444; }
 
-canvas {
-  background: #0f172a;
-  border-radius: 10px;
-  margin-top: 10px;
+.small {
+  font-size: 12px;
+  opacity: 0.8;
 }
 </style>
 </head>
@@ -69,11 +68,7 @@ canvas {
 
 <h3 id="roundText">Round: 0</h3>
 
-<canvas id="chart" height="200"></canvas>
-
 <div id="dashboard"></div>
-
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
 let multipliers = [
@@ -101,11 +96,11 @@ const probabilityMap = {
 };
 
 function save(){
-  localStorage.setItem("limbo_v2", JSON.stringify(entries));
+  localStorage.setItem("limbo_v3", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v2");
+  let data = localStorage.getItem("limbo_v3");
   if(data) entries = JSON.parse(data);
 }
 
@@ -129,7 +124,7 @@ function buildStats(){
   let current = 0;
 
   multipliers.forEach(m=>{
-    data[m] = {hits:0,last:0,history:[]};
+    data[m] = {hits:0,last:0};
   });
 
   entries.forEach(e=>{
@@ -139,36 +134,11 @@ function buildStats(){
       if(e.multi >= m){
         data[m].hits++;
         data[m].last = e.round;
-        data[m].history.push(e.round);
       }
     });
   });
 
   return {data,current};
-}
-
-function renderChart(dataObj){
-  let labels = multipliers;
-  let values = multipliers.map(m => dataObj[m].hits);
-
-  new Chart(document.getElementById("chart"), {
-    type: 'line',
-    data: {
-      labels: labels,
-      datasets: [{
-        label: 'Hits',
-        data: values,
-        borderColor: '#22c55e',
-        backgroundColor: '#22c55e'
-      }]
-    },
-    options: {
-      responsive: true,
-      plugins: {
-        legend: { display: false }
-      }
-    }
-  });
 }
 
 function render(){
@@ -177,8 +147,6 @@ function render(){
 
   document.getElementById("roundText").innerText = "Round: " + current;
 
-  renderChart(data);
-
   let html = "";
 
   multipliers.forEach(m=>{
@@ -186,25 +154,25 @@ function render(){
     let ago = last ? current - last : "-";
 
     let expected = probabilityMap[m];
-
     let actualRate = data[m].hits ? (current / data[m].hits).toFixed(0) : "-";
 
-    let status = data[m].hits && actualRate > expected
-      ? "bad"
-      : "good";
+    let status = data[m].hits && actualRate > expected ? "bad" : "good";
 
     html += `
       <div class="card">
-        <b>${m}x</b><br>
-        Hits: ${data[m].hits}<br>
-        Last: ${last || "-"}<br>
-        Ago: ${ago}<br><br>
+        <b>${m}x</b><br><br>
 
-        Expected: 1 / ${expected} rounds<br>
-        Actual: ~1 / ${actualRate} rounds<br>
+        Hits: ${data[m].hits}<br>
+        Last hit: ${last || "-"}<br>
+        Rounds ago: ${ago}<br><br>
+
+        <span class="small">
+          Expected: 1 / ${expected}<br>
+          Actual: ~1 / ${actualRate}
+        </span><br><br>
 
         <span class="${status}">
-          ${status === "good" ? "Within expectation" : "Above expected variance"}
+          ${status === "good" ? "Within expected range" : "Above expected variance"}
         </span>
       </div>
     `;
