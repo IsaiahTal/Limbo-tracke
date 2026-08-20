@@ -22,7 +22,6 @@ input {
   border: none;
 }
 
-/* GRID (6–3 layout on mobile) */
 .grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -30,7 +29,6 @@ input {
   margin-top: 10px;
 }
 
-/* BUTTON CELL */
 .cell {
   background: #111827;
   border-radius: 10px;
@@ -40,7 +38,6 @@ input {
   align-items: center;
 }
 
-/* BUTTON */
 button {
   padding: 8px;
   border-radius: 8px;
@@ -51,7 +48,6 @@ button {
   width: 70%;
 }
 
-/* HEAT BOX */
 .heat {
   width: 12px;
   height: 12px;
@@ -88,7 +84,6 @@ button {
 
 <button onclick="deleteLast()">🗑️ Delete Last</button>
 <button onclick="manualSave()">💾 Save Progress</button>
-<button onclick="resetAll()">🧨 Reset</button>
 
 <div id="status"></div>
 
@@ -113,11 +108,11 @@ const probabilityMap = {
 };
 
 function save(){
-  localStorage.setItem("limbo_v11", JSON.stringify(entries));
+  localStorage.setItem("limbo_v12", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v11");
+  let data = localStorage.getItem("limbo_v12");
   if(data) entries = JSON.parse(data);
 }
 
@@ -146,31 +141,18 @@ function deleteLast(){
   render();
 }
 
-function resetAll(){
-  if(!confirm("Reset ALL data?")) return;
-  entries = [];
-  localStorage.removeItem("limbo_v11");
-  render();
-  showStatus("🧨 Reset done");
-}
-
 function buildStats(){
   let data = {};
-  let current = 0;
+  let current = entries.length; // IMPORTANT FIX: rounds = entries count
 
   multipliers.forEach(m=>{
-    data[m] = {hits:0,misses:0,last:0};
+    data[m] = {hits:0};
   });
 
   entries.forEach(e=>{
-    current = e.round;
-
     multipliers.forEach(m=>{
       if(e.multi >= m){
         data[m].hits++;
-        data[m].last = e.round;
-      } else {
-        data[m].misses++;
       }
     });
   });
@@ -178,26 +160,23 @@ function buildStats(){
   return {data,current};
 }
 
-/* ✅ FIXED HEAT LOGIC (CORRECT VERSION) */
-function getHeat(hits, expected, current){
+/* FIXED HEAT MODEL */
+function getHeat(hits, expected, rounds){
 
-  let expectedHits = current / expected;
+  let expectedHits = rounds / expected;
 
   if(expectedHits === 0) return "green";
 
   let ratio = hits / expectedHits;
 
-  // 🟩 normal range
   if(ratio >= 0.8 && ratio <= 1.2){
     return "green";
   }
 
-  // 🟨 over-performing
   if(ratio > 1.2){
     return "yellow";
   }
 
-  // 🟥 under-performing
   return "red";
 }
 
@@ -205,15 +184,14 @@ function render(){
 
   let {data, current} = buildStats();
 
-  document.getElementById("roundText").innerText = "Round: " + current;
+  document.getElementById("roundText").innerText = "Rounds: " + current;
 
-  /* BUTTON GRID */
-  let btnHTML = "";
+  let html = "";
 
   multipliers.forEach(m=>{
-    let color = getHeat(data[m].hits, probabilityMap[m], current);
+    let color = getHeat(data[m].hits, m, current);
 
-    btnHTML += `
+    html += `
       <div class="cell">
         <button onclick="addEntry(${m})">${m}x</button>
         <div class="heat ${color}"></div>
@@ -221,21 +199,16 @@ function render(){
     `;
   });
 
-  document.getElementById("buttons").innerHTML = btnHTML;
+  document.getElementById("buttons").innerHTML = html;
 
-  /* STATS */
   let statsHTML = "";
 
   multipliers.forEach(m=>{
-    let expected = probabilityMap[m];
-    let total = data[m].hits + data[m].misses;
-
     statsHTML += `
       <div class="card">
         <b>${m}x</b><br>
         Hits: ${data[m].hits}<br>
-        Misses: ${data[m].misses}<br>
-        Expected: 1/${expected}
+        Expected: 1/${m}
       </div>
     `;
   });
