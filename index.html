@@ -26,15 +26,18 @@ button {
   padding: 10px;
   margin: 4px;
   border-radius: 10px;
-  border: none;
-  background: #1f2937;
+  border: 2px solid #1f2937;
   color: white;
   font-weight: bold;
   cursor: pointer;
+  transition: all 0.3s ease;
+  width: 100%;
+  font-size: 16px;
 }
 
 button:hover {
   opacity: 0.8;
+  transform: scale(1.02);
 }
 
 .grid {
@@ -44,38 +47,39 @@ button:hover {
   margin-top: 10px;
 }
 
+/* HEAT MAP COLORS FOR ENTIRE BUTTONS */
+.btn-heat-perfect { 
+  background: #0a3d1a !important; /* Green - Within expected variance */
+  border-color: #22c55e !important;
+}
+
+.btn-heat-above-mild { 
+  background: #3d3d1a !important; /* Dark Yellow - Just above expected variance */
+  border-color: #eab308 !important;
+}
+
+.btn-heat-above-severe { 
+  background: #4a3d0e !important; /* Bright Yellow - Very above expected variance */
+  border-color: #facc15 !important;
+}
+
+.btn-heat-under-mild { 
+  background: #3d1a1a !important; /* Red tint - Under expected variance */
+  border-color: #ef4444 !important;
+}
+
+.btn-heat-under-severe { 
+  background: #7f1d1d !important; /* Dark Red - Very under expected variance */
+  border-color: #dc2626 !important;
+}
+
+/* CARDS - No heat map colors, just neutral */
 .card {
   background: #111827;
   padding: 10px;
   border-radius: 10px;
   margin-top: 10px;
-  transition: all 0.3s ease;
-}
-
-/* HEAT MAP COLORS - Based on variance percentage */
-.heat-under-severe { 
-  background: #7f1d1d; /* Dark Red - Very under expected variance */
-  border-left: 4px solid #dc2626;
-}
-
-.heat-under-mild { 
-  background: #3d1a1a; /* Red tint - Under expected variance */
-  border-left: 4px solid #ef4444;
-}
-
-.heat-perfect { 
-  background: #0a3d1a; /* Green - Within expected variance */
-  border-left: 4px solid #22c55e;
-}
-
-.heat-above-mild { 
-  background: #3d3d1a; /* Dark Yellow - Just above expected variance */
-  border-left: 4px solid #eab308;
-}
-
-.heat-above-severe { 
-  background: #4a3d0e; /* Bright Yellow - Very above expected variance */
-  border-left: 4px solid #facc15;
+  border-left: 3px solid #1f2937;
 }
 
 .good { color: #22c55e; }
@@ -131,8 +135,19 @@ button:hover {
   font-size: 11px;
 }
 
-.button-highlight {
-  background: #3b82f6 !important;
+.button-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-left: 6px;
 }
 </style>
 </head>
@@ -146,7 +161,7 @@ button:hover {
 <div class="grid" id="buttons"></div>
 
 <div style="margin-top:10px; display:flex; gap:6px;">
-  <button onclick="deleteLast()" style="flex:1;">🗑️ Delete Last</button>
+  <button onclick="deleteLast()" style="flex:1; background:#1f2937;">🗑️ Delete Last</button>
   <button onclick="clearAll()" style="flex:1; background:#4a0e0e;">🗑️ Clear All</button>
 </div>
 
@@ -275,8 +290,8 @@ function buildStats(){
   return {data, current};
 }
 
-function getHeatMapClass(variance, totalRounds) {
-  if (variance === "-") return "heat-perfect";
+function getHeatMapType(variance, totalRounds) {
+  if (variance === "-") return "perfect";
   
   let v = parseFloat(variance);
   
@@ -284,11 +299,24 @@ function getHeatMapClass(variance, totalRounds) {
   let variancePercent = totalRounds > 0 ? (v / totalRounds) * 100 : 0;
   
   // Use percentage-based thresholds
-  if (variancePercent > 1) return "heat-under-severe";      // Dark Red - Very under expected
-  if (variancePercent > 0.5) return "heat-under-mild";      // Red - Under expected
-  if (variancePercent < -1) return "heat-above-severe";     // Bright Yellow - Very above expected
-  if (variancePercent < -0.5) return "heat-above-mild";     // Dark Yellow - Just above expected
-  return "heat-perfect";                                    // Green - Within expected variance
+  // Negative variance = above expected (more hits)
+  // Positive variance = under expected (fewer hits)
+  if (variancePercent > 1) return "under-severe";      // Dark Red - Very under expected
+  if (variancePercent > 0.5) return "under-mild";      // Red - Under expected
+  if (variancePercent < -1) return "above-severe";     // Bright Yellow - Very above expected
+  if (variancePercent < -0.5) return "above-mild";     // Dark Yellow - Just above expected
+  return "perfect";                                    // Green - Within expected variance
+}
+
+function getButtonClass(heatType) {
+  switch(heatType) {
+    case 'perfect': return 'btn-heat-perfect';
+    case 'above-mild': return 'btn-heat-above-mild';
+    case 'above-severe': return 'btn-heat-above-severe';
+    case 'under-mild': return 'btn-heat-under-mild';
+    case 'under-severe': return 'btn-heat-under-severe';
+    default: return '';
+  }
 }
 
 function render(){
@@ -298,6 +326,36 @@ function render(){
   document.getElementById("roundText").innerText = current;
   document.getElementById("entryCount").innerText = entries.length;
 
+  // Update the button grid with heat map colors on entire buttons
+  let buttonHtml = "";
+  multipliers.forEach(m=>{
+    let total = data[m].totalRounds;
+    let expectedHits = total / probabilityMap[m];
+    let actualHits = data[m].hits;
+    let variance = total > 0 ? actualHits - expectedHits : "-";
+    let heatType = getHeatMapType(variance, total);
+    let btnClass = getButtonClass(heatType);
+    
+    // Get status icon for button
+    let icon = "⚪";
+    if (total > 0) {
+      let variancePercent = total > 0 ? (parseFloat(variance) / total) * 100 : 0;
+      if (variancePercent > 1) icon = "🔴";
+      else if (variancePercent > 0.5) icon = "🟠";
+      else if (variancePercent < -1) icon = "🟡";
+      else if (variancePercent < -0.5) icon = "🟨";
+      else icon = "✅";
+    }
+    
+    buttonHtml += `
+      <button class="${btnClass}" onclick="addEntry(${m})">
+        ${m}x
+      </button>
+    `;
+  });
+  document.getElementById("buttons").innerHTML = buttonHtml;
+
+  // Render dashboard cards WITHOUT heat map colors
   let html = "";
 
   // Show info about rounds
@@ -335,9 +393,6 @@ function render(){
     // Calculate variance as percentage
     let variancePercent = total > 0 ? ((variance !== "-" ? parseFloat(variance) : 0) / total * 100) : 0;
     
-    // Determine heat map color
-    let heatClass = getHeatMapClass(variance, total);
-    
     // Status label based on variance percentage
     let statusClass, statusLabel, statusIcon;
     if (total === 0) {
@@ -371,7 +426,7 @@ function render(){
     let expectedPercentage = (1/expected*100).toFixed(4);
 
     html += `
-      <div class="card ${heatClass}">
+      <div class="card">
         <div class="stats-row">
           <b style="font-size:18px;">${m}x</b>
           <span style="font-size:20px;">${statusIcon}</span>
@@ -409,6 +464,7 @@ function render(){
 }
 
 function createButtons(){
+  // Initial button creation without colors
   let html = "";
   multipliers.forEach(m=>{
     html += `<button onclick="addEntry(${m})">${m}x</button>`;
