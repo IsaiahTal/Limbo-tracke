@@ -134,21 +134,6 @@ button:hover {
   border-radius: 10px;
   font-size: 11px;
 }
-
-.button-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-}
-
-.status-dot {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  margin-left: 6px;
-}
 </style>
 </head>
 
@@ -298,13 +283,12 @@ function getHeatMapType(variance, totalRounds) {
   // Calculate variance as percentage of total rounds
   let variancePercent = totalRounds > 0 ? (v / totalRounds) * 100 : 0;
   
-  // Use percentage-based thresholds
-  // Negative variance = above expected (more hits)
-  // Positive variance = under expected (fewer hits)
-  if (variancePercent > 1) return "under-severe";      // Dark Red - Very under expected
-  if (variancePercent > 0.5) return "under-mild";      // Red - Under expected
-  if (variancePercent < -1) return "above-severe";     // Bright Yellow - Very above expected
-  if (variancePercent < -0.5) return "above-mild";     // Dark Yellow - Just above expected
+  // FIXED: Positive variance = MORE hits than expected = Above Expected (Yellow)
+  // Negative variance = FEWER hits than expected = Under Expected (Red)
+  if (variancePercent > 1) return "above-severe";      // Bright Yellow - Very above expected
+  if (variancePercent > 0.5) return "above-mild";      // Dark Yellow - Just above expected
+  if (variancePercent < -1) return "under-severe";     // Dark Red - Very under expected
+  if (variancePercent < -0.5) return "under-mild";     // Red - Under expected
   return "perfect";                                    // Green - Within expected variance
 }
 
@@ -335,17 +319,6 @@ function render(){
     let variance = total > 0 ? actualHits - expectedHits : "-";
     let heatType = getHeatMapType(variance, total);
     let btnClass = getButtonClass(heatType);
-    
-    // Get status icon for button
-    let icon = "⚪";
-    if (total > 0) {
-      let variancePercent = total > 0 ? (parseFloat(variance) / total) * 100 : 0;
-      if (variancePercent > 1) icon = "🔴";
-      else if (variancePercent > 0.5) icon = "🟠";
-      else if (variancePercent < -1) icon = "🟡";
-      else if (variancePercent < -0.5) icon = "🟨";
-      else icon = "✅";
-    }
     
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})">
@@ -400,21 +373,21 @@ function render(){
       statusLabel = "No data yet";
       statusIcon = "⚪";
     } else if (variancePercent > 1) {
-      statusClass = "critical";
-      statusLabel = "🔴 Very Under Expected";
-      statusIcon = "🔴";
-    } else if (variancePercent > 0.5) {
-      statusClass = "bad";
-      statusLabel = "🟠 Under Expected";
-      statusIcon = "🟠";
-    } else if (variancePercent < -1) {
       statusClass = "warning";
       statusLabel = "🟡 Very Above Expected";
       statusIcon = "🟡";
-    } else if (variancePercent < -0.5) {
+    } else if (variancePercent > 0.5) {
       statusClass = "warning";
       statusLabel = "🟨 Above Expected";
       statusIcon = "🟨";
+    } else if (variancePercent < -1) {
+      statusClass = "critical";
+      statusLabel = "🔴 Very Under Expected";
+      statusIcon = "🔴";
+    } else if (variancePercent < -0.5) {
+      statusClass = "bad";
+      statusLabel = "🟠 Under Expected";
+      statusIcon = "🟠";
     } else {
       statusClass = "good";
       statusLabel = "✅ Within Expected";
