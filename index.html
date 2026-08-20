@@ -189,7 +189,6 @@ let multipliers = [
 ];
 
 let entries = [];
-let pendingMulti = null;
 
 const probabilityMap = {
   200: 200,
@@ -222,9 +221,8 @@ function addEntryManually(){
   if(!r) return alert("Enter round number");
   if(r <= 0) return alert("Round must be greater than 0");
   
-  // Show popup to select multiplier
   let multi = prompt("Enter multiplier for round " + r + " (200-5000):", "1000");
-  if(multi === null) return; // User cancelled
+  if(multi === null) return;
   multi = parseInt(multi);
   if(!multipliers.includes(multi)) {
     alert("Invalid multiplier. Choose from: " + multipliers.join(", "));
