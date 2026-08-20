@@ -83,7 +83,7 @@ button {
 <div class="grid" id="buttons"></div>
 
 <button onclick="deleteLast()">🗑️ Delete Last</button>
-<button onclick="manualSave()">💾 Save Progress</button>
+<button onclick="manualSave()">💾 Save</button>
 
 <div id="status"></div>
 
@@ -102,11 +102,11 @@ let multipliers = [
 let entries = [];
 
 function save(){
-  localStorage.setItem("limbo_v13", JSON.stringify(entries));
+  localStorage.setItem("limbo_v14", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v13");
+  let data = localStorage.getItem("limbo_v14");
   if(data) entries = JSON.parse(data);
 }
 
@@ -135,10 +135,10 @@ function deleteLast(){
   render();
 }
 
-/* BUILD STATS */
+/* STATS */
 function buildStats(){
   let data = {};
-  let rounds = entries.length; // FIXED ROUND COUNT
+  let rounds = entries.length;
 
   multipliers.forEach(m=>{
     data[m] = {hits:0};
@@ -160,7 +160,10 @@ function getHeat(hits, expected, rounds){
 
   let expectedHits = rounds / expected;
 
-  if(expectedHits === 0) return "green";
+  // 🟢 NOT ENOUGH DATA = GREEN (IMPORTANT FIX)
+  if(expectedHits < 1){
+    return "green";
+  }
 
   let ratio = hits / expectedHits;
 
@@ -206,7 +209,6 @@ function render(){
         <b>${m}x</b><br>
         Hits: ${data[m].hits}<br>
         Expected hits: ${expectedHits.toFixed(3)}<br>
-        Expected: 1/${m}
       </div>
     `;
   });
