@@ -11,6 +11,7 @@ body {
   color: white;
   padding: 15px;
 }
+
 h2 { text-align: center; }
 
 input {
@@ -34,12 +35,13 @@ button {
 .grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: 6px;
+  margin-top: 10px;
 }
 
 .card {
   background: #1e293b;
-  padding: 12px;
+  padding: 10px;
   border-radius: 10px;
   margin-top: 8px;
 }
@@ -48,6 +50,11 @@ button {
   color: #22c55e;
   font-weight: bold;
 }
+
+.small {
+  font-size: 12px;
+  opacity: 0.8;
+}
 </style>
 </head>
 
@@ -55,9 +62,11 @@ button {
 
 <h2>🎯 Limbo Tracker</h2>
 
-<input id="roundInput" placeholder="Enter Round Number (e.g. 1900)" type="number">
+<input id="roundInput" type="number" placeholder="Enter Round Number">
 
 <div class="grid" id="buttons"></div>
+
+<button onclick="deleteLast()">🗑️ Delete Last Entry</button>
 
 <h3 id="roundText">Round: 0</h3>
 
@@ -69,58 +78,64 @@ let multipliers = [
 1500,2000,3000,4000,5000
 ];
 
-let data = {};
-let currentRound = 0;
-let lastRound = 0;
+let entries = [];
 
-multipliers.forEach(m=>{
-  data[m] = {hits:0,last:0};
-});
-
-function save() {
-  localStorage.setItem("limboData", JSON.stringify({data,currentRound,lastRound}));
+function save(){
+  localStorage.setItem("limbo_entries", JSON.stringify(entries));
 }
 
-function load() {
-  let saved = JSON.parse(localStorage.getItem("limboData"));
+function load(){
+  let saved = localStorage.getItem("limbo_entries");
   if(saved){
-    data = saved.data;
-    currentRound = saved.currentRound;
-    lastRound = saved.lastRound;
+    entries = JSON.parse(saved);
   }
 }
 
-function clickMulti(m){
+function addEntry(m){
   let r = parseInt(document.getElementById("roundInput").value);
   if(!r) return alert("Enter round number");
 
-  let gap = r - lastRound;
-  if(gap < 0) return alert("Round must increase");
+  entries.push({round:r, multi:m});
+  save();
+  render();
+}
 
-  currentRound += gap;
-
-  multipliers.forEach(x=>{
-    if(m >= x){
-      data[x].hits++;
-      data[x].last = r;
-    }
-  });
-
-  lastRound = r;
-
+function deleteLast(){
+  if(entries.length === 0) return;
+  entries.pop();
   save();
   render();
 }
 
 function render(){
+
+  let data = {};
+  let currentRound = 0;
+
+  multipliers.forEach(m=>{
+    data[m] = {hits:0,last:0};
+  });
+
+  entries.forEach(e=>{
+    currentRound = e.round;
+
+    multipliers.forEach(m=>{
+      if(e.multi >= m){
+        data[m].hits++;
+        data[m].last = e.round;
+      }
+    });
+  });
+
   document.getElementById("roundText").innerText = "Round: " + currentRound;
 
-  let stats = "";
+  let html = "";
+
   multipliers.forEach(m=>{
     let last = data[m].last;
     let ago = last ? currentRound - last : "-";
 
-    stats += `
+    html += `
       <div class="card">
         <b>${m}x</b><br>
         Hits: ${data[m].hits}<br>
@@ -130,13 +145,13 @@ function render(){
     `;
   });
 
-  document.getElementById("stats").innerHTML = stats;
+  document.getElementById("stats").innerHTML = html;
 }
 
 function createButtons(){
   let html = "";
   multipliers.forEach(m=>{
-    html += `<button onclick="clickMulti(${m})">${m}x</button>`;
+    html += `<button onclick="addEntry(${m})">${m}x</button>`;
   });
   document.getElementById("buttons").innerHTML = html;
 }
