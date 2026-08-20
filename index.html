@@ -87,6 +87,8 @@ button:hover {
 .bad { color: #ef4444; }
 .warning { color: #eab308; }
 .critical { color: #dc2626; }
+.ahead { color: #22c55e; }
+.behind { color: #ef4444; }
 
 .small {
   font-size: 12px;
@@ -118,6 +120,26 @@ button:hover {
   font-weight: bold;
   font-size: 12px;
   background: #1f2937;
+}
+
+.ahead-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 12px;
+  background: #0a3d1a;
+  color: #22c55e;
+}
+
+.behind-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 12px;
+  background: #3d1a1a;
+  color: #ef4444;
 }
 
 .info-box {
@@ -403,6 +425,13 @@ function render(){
     let actualRoundsPerHit = actualHits > 0 ? (total / actualHits).toFixed(0) : "∞";
     let ratio = actualHits > 0 ? (total / actualHits) / expected : Infinity;
     
+    // Calculate ahead/behind
+    let aheadBehind = actualHits - expectedHits;
+    let aheadBehindDisplay = aheadBehind.toFixed(2);
+    let aheadBehindClass = aheadBehind >= 0 ? "ahead" : "behind";
+    let aheadBehindLabel = aheadBehind >= 0 ? "Ahead" : "Behind";
+    let aheadBehindIcon = aheadBehind >= 0 ? "✅" : "🔴";
+    
     let statusClass, statusLabel, statusIcon;
     if (total === 0) {
       statusClass = "good";
@@ -479,6 +508,15 @@ function render(){
             ${statusLabel}
           </span>
           ${actualHits > 0 ? `<span class="variance-badge">1/${actualRoundsPerHit} rounds</span>` : ''}
+        </div>
+        
+        <div class="stats-row" style="margin-top:6px; padding-top:6px; border-top:1px solid #1f2937;">
+          <span style="font-size:14px;">
+            Expected hits: <b>${expectedHits.toFixed(2)}</b>
+          </span>
+          <span class="${aheadBehindClass}" style="font-weight:bold; font-size:14px;">
+            ${aheadBehindIcon} ${aheadBehindLabel} by <b>${Math.abs(aheadBehind).toFixed(2)}</b>
+          </span>
         </div>
       </div>
     `;
