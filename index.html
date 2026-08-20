@@ -22,58 +22,113 @@ input {
   border: none;
 }
 
-/* GRID */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
-  margin-top: 10px;
-}
-
-/* CELL */
-.cell {
-  background: #111827;
-  border-radius: 10px;
-  padding: 8px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-/* BUTTON */
 button {
-  padding: 8px;
-  border-radius: 8px;
+  padding: 10px;
+  margin: 4px;
+  border-radius: 10px;
   border: none;
   background: #1f2937;
   color: white;
   font-weight: bold;
-  width: 70%;
+  cursor: pointer;
 }
 
-/* HEAT */
-.heat {
-  width: 12px;
-  height: 12px;
-  border-radius: 3px;
+button:hover {
+  opacity: 0.8;
 }
 
-.green { background: #22c55e; }
-.yellow { background: #facc15; }
-.red { background: #ef4444; }
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
 
 .card {
   background: #111827;
   padding: 10px;
   border-radius: 10px;
   margin-top: 10px;
-  font-size: 13px;
+  transition: all 0.3s ease;
 }
 
-#status {
+/* HEAT MAP COLORS - Based on variance threshold of 7 */
+.heat-under-severe { 
+  background: #7f1d1d; /* Dark Red - Very under expected variance */
+  border-left: 4px solid #dc2626;
+}
+
+.heat-under-mild { 
+  background: #3d1a1a; /* Red tint - Under expected variance */
+  border-left: 4px solid #ef4444;
+}
+
+.heat-perfect { 
+  background: #0a3d1a; /* Green - Within expected variance */
+  border-left: 4px solid #22c55e;
+}
+
+.heat-above-mild { 
+  background: #3d3d1a; /* Dark Yellow - Just above expected variance */
+  border-left: 4px solid #eab308;
+}
+
+.heat-above-severe { 
+  background: #4a3d0e; /* Bright Yellow - Very above expected variance */
+  border-left: 4px solid #facc15;
+}
+
+.good { color: #22c55e; }
+.bad { color: #ef4444; }
+.warning { color: #eab308; }
+.critical { color: #dc2626; }
+
+.small {
   font-size: 12px;
   opacity: 0.8;
-  margin-top: 6px;
+}
+
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 4px 0;
+}
+
+.round-counter {
+  font-size: 24px;
+  font-weight: bold;
+  text-align: center;
+  margin: 10px 0;
+  padding: 10px;
+  background: #111827;
+  border-radius: 10px;
+  border: 2px solid #1f2937;
+}
+
+.variance-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-weight: bold;
+  font-size: 12px;
+  background: #1f2937;
+}
+
+.info-box {
+  background: #111827;
+  padding: 8px 12px;
+  border-radius: 8px;
+  margin: 5px 0;
+  font-size: 13px;
+  border-left: 3px solid #3b82f6;
+}
+
+.range-badge {
+  background: #1e293b;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
 }
 </style>
 </head>
@@ -86,154 +141,273 @@ button {
 
 <div class="grid" id="buttons"></div>
 
-<button onclick="deleteLast()">🗑️ Delete Last</button>
-<button onclick="manualSave()">💾 Save</button>
-<button onclick="resetAll()">🧨 Reset</button>
+<div style="margin-top:10px; display:flex; gap:6px;">
+  <button onclick="deleteLast()" style="flex:1;">🗑️ Delete Last</button>
+  <button onclick="clearAll()" style="flex:1; background:#4a0e0e;">🗑️ Clear All</button>
+</div>
 
-<div id="status"></div>
-
-<h3 id="roundText">Rounds: 0</h3>
+<div class="round-counter">
+  📊 Current Round: <span id="roundText">0</span>
+  <span style="font-size:14px; opacity:0.6; margin-left:10px;">
+    (Entries: <span id="entryCount">0</span>)
+  </span>
+</div>
 
 <div id="dashboard"></div>
 
 <script>
-
 let multipliers = [
-200,300,400,500,600,700,
-800,900,1000,1500,2000,
-3000,4000,5000
+200,300,400,500,600,700,800,900,1000,
+1500,2000,3000,4000,5000
 ];
 
 let entries = [];
 
+const probabilityMap = {
+  200: 200,
+  300: 300,
+  400: 400,
+  500: 500,
+  600: 600,
+  700: 700,
+  800: 800,
+  900: 900,
+  1000: 1000,
+  1500: 1500,
+  2000: 2000,
+  3000: 3000,
+  4000: 4000,
+  5000: 5000
+};
+
 function save(){
-  localStorage.setItem("limbo_v16", JSON.stringify(entries));
+  localStorage.setItem("limbo_v4", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v16");
+  let data = localStorage.getItem("limbo_v4");
   if(data) entries = JSON.parse(data);
-}
-
-function manualSave(){
-  save();
-  showStatus("✔ Saved");
-}
-
-function showStatus(msg){
-  document.getElementById("status").innerText = msg;
-  setTimeout(()=>document.getElementById("status").innerText="",2000);
 }
 
 function addEntry(hitMulti){
   let r = parseInt(document.getElementById("roundInput").value);
   if(!r) return alert("Enter round number");
+  if(r <= 0) return alert("Round must be greater than 0");
+  
+  // Check if we already have this round
+  if(entries.some(e => e.round === r)) {
+    return alert("Round " + r + " already exists! Delete it first or use a different round.");
+  }
 
   entries.push({round:r, multi:hitMulti});
+  // Sort entries by round number
+  entries.sort((a,b) => a.round - b.round);
   save();
   render();
 }
 
 function deleteLast(){
+  if(entries.length === 0) return alert("No entries to delete");
   entries.pop();
   save();
   render();
 }
 
-function resetAll(){
-  if(!confirm("Reset EVERYTHING?")) return;
-  entries = [];
-  localStorage.removeItem("limbo_v16");
-  render();
+function clearAll(){
+  if(entries.length === 0) return;
+  if(confirm("Clear all entries?")){
+    entries = [];
+    save();
+    render();
+  }
 }
 
-/* STATS */
 function buildStats(){
   let data = {};
-  let rounds = entries.length;
+  let current = 0;
 
   multipliers.forEach(m=>{
-    data[m] = {hits:0};
+    data[m] = {
+      hits: 0,
+      misses: 0,
+      totalRounds: 0,
+      lastHit: 0
+    };
   });
 
-  entries.forEach(e=>{
-    multipliers.forEach(m=>{
-      if(e.multi >= m){
+  if(entries.length === 0) {
+    return {data, current: 0};
+  }
+
+  // Get the last round (no limit, goes as high as the user inputs)
+  current = entries[entries.length - 1].round;
+
+  // Process each round from 1 to current (unlimited)
+  let entryIndex = 0;
+  
+  for(let round = 1; round <= current; round++) {
+    // Check if this round has a hit
+    let hitMulti = null;
+    if(entryIndex < entries.length && entries[entryIndex].round === round) {
+      hitMulti = entries[entryIndex].multi;
+      entryIndex++;
+    }
+
+    // Process all multipliers for this round
+    multipliers.forEach(m => {
+      data[m].totalRounds++;
+      
+      if(hitMulti !== null && hitMulti >= m) {
+        // Hit for this multiplier
         data[m].hits++;
+        data[m].lastHit = round;
+      } else {
+        // Miss for this multiplier
+        data[m].misses++;
       }
     });
-  });
+  }
 
-  return {data, rounds};
+  return {data, current};
 }
 
-/* FINAL CORRECT HEAT */
-function getHeat(hits, m, rounds){
-
-  let expectedHits = rounds / m;
-
-  // low data zone
-  if(expectedHits < 1){
-    return "green";
-  }
-
-  let ratio = hits / expectedHits;
-
-  if(ratio >= 0.8 && ratio <= 1.2){
-    return "green";
-  }
-
-  if(ratio > 1.2){
-    return "yellow";
-  }
-
-  return "red";
-}
-
-/* FORMAT 1/XXX */
-function formatExpected(m){
-  return `1/${m}`;
+function getHeatMapClass(variance) {
+  if (variance === "-") return "heat-perfect";
+  
+  let v = parseFloat(variance);
+  
+  if (v >= 7) return "heat-under-severe";      // Dark Red - Very under expected
+  if (v >= 3) return "heat-under-mild";        // Red - Under expected
+  if (v <= -7) return "heat-above-severe";     // Bright Yellow - Very above expected
+  if (v <= -3) return "heat-above-mild";       // Dark Yellow - Just above expected
+  return "heat-perfect";                        // Green - Within expected variance
 }
 
 function render(){
 
-  let {data, rounds} = buildStats();
+  let {data, current} = buildStats();
 
-  document.getElementById("roundText").innerText = "Rounds: " + rounds;
+  document.getElementById("roundText").innerText = current;
+  document.getElementById("entryCount").innerText = entries.length;
 
   let html = "";
 
+  // Show info about rounds
+  if(entries.length > 0) {
+    html += `
+      <div class="info-box">
+        📊 Total Rounds: <b>${current.toLocaleString()}</b> | 
+        Entries: <b>${entries.length}</b> | 
+        Range: <b>1 - ${current.toLocaleString()}</b>
+        ${current > 0 ? `<span class="range-badge">All rounds automatically counted (unlimited)</span>` : ''}
+      </div>
+    `;
+  }
+
   multipliers.forEach(m=>{
-    let color = getHeat(data[m].hits, m, rounds);
+    let last = data[m].lastHit;
+    let ago = last ? current - last : "-";
+
+    let expected = probabilityMap[m];
+    let total = data[m].totalRounds;
+    
+    // Calculate expected hits as fraction
+    let expectedHits = total / expected;
+    let actualHits = data[m].hits;
+    
+    // Calculate variance
+    let variance = "-";
+    let varianceDisplay = "-";
+    if (total > 0) {
+      let diff = actualHits - expectedHits;
+      variance = diff;
+      varianceDisplay = diff.toFixed(2);
+    }
+    
+    // Determine heat map color
+    let heatClass = getHeatMapClass(variance);
+    
+    // Status label based on variance
+    let statusClass, statusLabel, statusIcon;
+    if (total === 0) {
+      statusClass = "good";
+      statusLabel = "No data yet";
+      statusIcon = "⚪";
+    } else if (variance >= 7) {
+      statusClass = "critical";
+      statusLabel = "🔴 Very Under Expected";
+      statusIcon = "🔴";
+    } else if (variance >= 3) {
+      statusClass = "bad";
+      statusLabel = "🟠 Under Expected";
+      statusIcon = "🟠";
+    } else if (variance <= -7) {
+      statusClass = "warning";
+      statusLabel = "🟡 Very Above Expected";
+      statusIcon = "🟡";
+    } else if (variance <= -3) {
+      statusClass = "warning";
+      statusLabel = "🟨 Above Expected";
+      statusIcon = "🟨";
+    } else {
+      statusClass = "good";
+      statusLabel = "✅ Within Expected";
+      statusIcon = "✅";
+    }
+
+    // Calculate percentages
+    let hitPercentage = total > 0 ? (actualHits/total*100).toFixed(2) : 0;
+    let expectedPercentage = (1/expected*100).toFixed(4);
 
     html += `
-      <div class="cell">
-        <button onclick="addEntry(${m})">${m}x</button>
-        <div class="heat ${color}"></div>
+      <div class="card ${heatClass}">
+        <div class="stats-row">
+          <b style="font-size:18px;">${m}x</b>
+          <span style="font-size:20px;">${statusIcon}</span>
+        </div>
+        
+        <div class="stats-row">
+          <span>Hits: <b>${actualHits}</b></span>
+          <span>Misses: <b>${data[m].misses.toLocaleString()}</b></span>
+          <span>Total: <b>${total.toLocaleString()}</b></span>
+        </div>
+        
+        <div class="stats-row small">
+          <span>Last hit: ${last || "-"}</span>
+          <span>Rounds ago: ${ago}</span>
+        </div>
+        
+        <div class="stats-row small">
+          <span>Expected: <b>1/${expected}</b> (${expectedPercentage}%)</span>
+          <span>Actual: <b>${actualHits}/${total.toLocaleString()}</b> (${hitPercentage}%)</span>
+        </div>
+        
+        <div class="stats-row">
+          <span class="${statusClass}">
+            ${statusLabel}
+          </span>
+          ${variance !== "-" ? `<span class="variance-badge">Variance: ${varianceDisplay}</span>` : ''}
+        </div>
+        
+        ${data[m].hits > 0 ? `<div class="small" style="margin-top:4px; opacity:0.6;">Hit rate: 1/${(total/actualHits).toFixed(0)}</div>` : ''}
       </div>
     `;
   });
 
-  document.getElementById("buttons").innerHTML = html;
+  document.getElementById("dashboard").innerHTML = html;
+}
 
-  let statsHTML = "";
-
+function createButtons(){
+  let html = "";
   multipliers.forEach(m=>{
-    statsHTML += `
-      <div class="card">
-        <b>${m}x</b><br>
-        Hits: ${data[m].hits}<br>
-        Expected: ${formatExpected(m)}
-      </div>
-    `;
+    html += `<button onclick="addEntry(${m})">${m}x</button>`;
   });
-
-  document.getElementById("dashboard").innerHTML = statsHTML;
+  document.getElementById("buttons").innerHTML = html;
 }
 
 load();
+createButtons();
 render();
-
 </script>
 
 </body>
