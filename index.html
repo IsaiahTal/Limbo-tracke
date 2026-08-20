@@ -44,14 +44,32 @@ button {
   padding: 10px;
   border-radius: 10px;
   margin-top: 10px;
+  position: relative;
 }
-
-.good { color: #22c55e; }
-.bad { color: #ef4444; }
 
 .small {
   font-size: 12px;
   opacity: 0.8;
+}
+
+/* Heat square */
+.heat {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  position: absolute;
+  top: 10px;
+  right: 10px;
+}
+
+.green { background: #22c55e; }
+.yellow { background: #facc15; }
+.red { background: #ef4444; }
+
+#status {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 6px;
 }
 </style>
 </head>
@@ -65,6 +83,10 @@ button {
 <div class="grid" id="buttons"></div>
 
 <button onclick="deleteLast()">🗑️ Delete Last</button>
+<button onclick="manualSave()">💾 Save Progress</button>
+<button onclick="resetAll()">🧨 Reset Everything</button>
+
+<div id="status"></div>
 
 <h3 id="roundText">Round: 0</h3>
 
@@ -96,19 +118,29 @@ const probabilityMap = {
 };
 
 function save(){
-  localStorage.setItem("limbo_v3", JSON.stringify(entries));
+  localStorage.setItem("limbo_v7", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v3");
+  let data = localStorage.getItem("limbo_v7");
   if(data) entries = JSON.parse(data);
 }
 
-function addEntry(m){
+function manualSave(){
+  save();
+  showStatus("✔ Progress saved");
+}
+
+function showStatus(msg){
+  document.getElementById("status").innerText = msg;
+  setTimeout(()=>document.getElementById("status").innerText="",2000);
+}
+
+function addEntry(hitMulti){
   let r = parseInt(document.getElementById("roundInput").value);
   if(!r) return alert("Enter round number");
 
-  entries.push({round:r, multi:m});
+  entries.push({round:r, multi:hitMulti});
   save();
   render();
 }
@@ -119,12 +151,25 @@ function deleteLast(){
   render();
 }
 
+function resetAll(){
+
+  let confirmReset = confirm("⚠️ Are you sure you want to reset ALL stats and logs?");
+
+  if(!confirmReset) return;
+
+  entries = [];
+  localStorage.removeItem("limbo_v7");
+
+  render();
+  showStatus("🧨 Everything reset");
+}
+
 function buildStats(){
   let data = {};
   let current = 0;
 
   multipliers.forEach(m=>{
-    data[m] = {hits:0,last:0};
+    data[m] = {hits:0,misses:0,last:0};
   });
 
   entries.forEach(e=>{
@@ -134,11 +179,25 @@ function buildStats(){
       if(e.multi >= m){
         data[m].hits++;
         data[m].last = e.round;
+      } else {
+        data[m].misses++;
       }
     });
   });
 
   return {data,current};
+}
+
+function getHeatColor(hits, expected, current){
+  let actualRate = hits ? current / hits : 0;
+
+  if(actualRate < expected * 0.8){
+    return "red";
+  }
+  if(actualRate > expected * 1.2){
+    return "yellow";
+  }
+  return "green";
 }
 
 function render(){
@@ -154,25 +213,24 @@ function render(){
     let ago = last ? current - last : "-";
 
     let expected = probabilityMap[m];
-    let actualRate = data[m].hits ? (current / data[m].hits).toFixed(0) : "-";
 
-    let status = data[m].hits && actualRate > expected ? "bad" : "good";
+    let color = getHeatColor(data[m].hits, expected, current);
 
     html += `
       <div class="card">
+
+        <div class="heat ${color}"></div>
+
         <b>${m}x</b><br><br>
 
         Hits: ${data[m].hits}<br>
+        Misses: ${data[m].misses}<br>
         Last hit: ${last || "-"}<br>
         Rounds ago: ${ago}<br><br>
 
         <span class="small">
           Expected: 1 / ${expected}<br>
-          Actual: ~1 / ${actualRate}
-        </span><br><br>
-
-        <span class="${status}">
-          ${status === "good" ? "Within expected range" : "Above expected variance"}
+          Actual: ~1 / ${data[m].hits ? (current / data[m].hits).toFixed(0) : "-"}
         </span>
       </div>
     `;
