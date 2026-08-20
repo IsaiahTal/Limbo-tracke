@@ -22,26 +22,25 @@ input {
   border: none;
 }
 
-/* 🔥 6x6 GRID */
+/* GRID (6–3 layout on mobile) */
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr); /* mobile safe 3 cols */
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin-top: 10px;
 }
 
-/* each multiplier box */
+/* BUTTON CELL */
 .cell {
   background: #111827;
   border-radius: 10px;
   padding: 8px;
-  position: relative;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
-/* button inside cell */
+/* BUTTON */
 button {
   padding: 8px;
   border-radius: 8px;
@@ -52,7 +51,7 @@ button {
   width: 70%;
 }
 
-/* heat square */
+/* HEAT BOX */
 .heat {
   width: 12px;
   height: 12px;
@@ -63,18 +62,18 @@ button {
 .yellow { background: #facc15; }
 .red { background: #ef4444; }
 
-#status {
-  font-size: 12px;
-  opacity: 0.8;
-  margin-top: 6px;
-}
-
 .card {
   background: #111827;
   padding: 10px;
   border-radius: 10px;
   margin-top: 10px;
   font-size: 13px;
+}
+
+#status {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 6px;
 }
 </style>
 </head>
@@ -98,6 +97,7 @@ button {
 <div id="dashboard"></div>
 
 <script>
+
 let multipliers = [
 200,300,400,500,600,700,
 800,900,1000,1500,2000,
@@ -113,11 +113,11 @@ const probabilityMap = {
 };
 
 function save(){
-  localStorage.setItem("limbo_v10", JSON.stringify(entries));
+  localStorage.setItem("limbo_v11", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v10");
+  let data = localStorage.getItem("limbo_v11");
   if(data) entries = JSON.parse(data);
 }
 
@@ -149,7 +149,7 @@ function deleteLast(){
 function resetAll(){
   if(!confirm("Reset ALL data?")) return;
   entries = [];
-  localStorage.removeItem("limbo_v10");
+  localStorage.removeItem("limbo_v11");
   render();
   showStatus("🧨 Reset done");
 }
@@ -178,13 +178,27 @@ function buildStats(){
   return {data,current};
 }
 
-/* 🔥 HEAT LOGIC */
+/* ✅ FIXED HEAT LOGIC (CORRECT VERSION) */
 function getHeat(hits, expected, current){
-  let rate = hits ? current / hits : 0;
 
-  if(rate < expected * 0.8) return "red";
-  if(rate > expected * 1.2) return "yellow";
-  return "green";
+  let expectedHits = current / expected;
+
+  if(expectedHits === 0) return "green";
+
+  let ratio = hits / expectedHits;
+
+  // 🟩 normal range
+  if(ratio >= 0.8 && ratio <= 1.2){
+    return "green";
+  }
+
+  // 🟨 over-performing
+  if(ratio > 1.2){
+    return "yellow";
+  }
+
+  // 🟥 under-performing
+  return "red";
 }
 
 function render(){
@@ -193,9 +207,7 @@ function render(){
 
   document.getElementById("roundText").innerText = "Round: " + current;
 
-  /* =========================
-     GRID BUTTON SECTION
-     ========================= */
+  /* BUTTON GRID */
   let btnHTML = "";
 
   multipliers.forEach(m=>{
@@ -211,23 +223,19 @@ function render(){
 
   document.getElementById("buttons").innerHTML = btnHTML;
 
-  /* =========================
-     FULL STATS SECTION (RESTORED)
-     ========================= */
+  /* STATS */
   let statsHTML = "";
 
   multipliers.forEach(m=>{
     let expected = probabilityMap[m];
     let total = data[m].hits + data[m].misses;
-    let actualRate = data[m].hits ? (total / data[m].hits).toFixed(0) : "-";
 
     statsHTML += `
       <div class="card">
         <b>${m}x</b><br>
         Hits: ${data[m].hits}<br>
         Misses: ${data[m].misses}<br>
-        Expected: 1/${expected}<br>
-        Actual: ~1/${actualRate}
+        Expected: 1/${expected}
       </div>
     `;
   });
@@ -237,6 +245,7 @@ function render(){
 
 load();
 render();
+
 </script>
 
 </body>
