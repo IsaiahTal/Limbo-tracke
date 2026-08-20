@@ -22,37 +22,37 @@ input {
   border: none;
 }
 
-/* 🔥 HORIZONTAL SCROLL BAR */
-.buttonBar {
-  display: flex;
-  overflow-x: auto;
+/* 🔥 6x6 GRID */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr); /* mobile safe 3 cols */
   gap: 8px;
-  padding: 10px 4px;
-  white-space: nowrap;
+  margin-top: 10px;
 }
 
-.btnWrap {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+/* each multiplier box */
+.cell {
   background: #111827;
-  padding: 8px;
   border-radius: 10px;
-  flex: 0 0 auto;
+  padding: 8px;
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-/* BUTTON */
+/* button inside cell */
 button {
-  padding: 10px 14px;
-  border-radius: 10px;
+  padding: 8px;
+  border-radius: 8px;
   border: none;
   background: #1f2937;
   color: white;
   font-weight: bold;
-  flex: 0 0 auto;
+  width: 70%;
 }
 
-/* HEAT SQUARE */
+/* heat square */
 .heat {
   width: 12px;
   height: 12px;
@@ -68,6 +68,14 @@ button {
   opacity: 0.8;
   margin-top: 6px;
 }
+
+.card {
+  background: #111827;
+  padding: 10px;
+  border-radius: 10px;
+  margin-top: 10px;
+  font-size: 13px;
+}
 </style>
 </head>
 
@@ -77,7 +85,7 @@ button {
 
 <input id="roundInput" type="number" placeholder="Enter Round Number">
 
-<div class="buttonBar" id="buttons"></div>
+<div class="grid" id="buttons"></div>
 
 <button onclick="deleteLast()">🗑️ Delete Last</button>
 <button onclick="manualSave()">💾 Save Progress</button>
@@ -91,35 +99,25 @@ button {
 
 <script>
 let multipliers = [
-200,300,400,500,600,700,800,900,1000,
-1500,2000,3000,4000,5000
+200,300,400,500,600,700,
+800,900,1000,1500,2000,
+3000,4000,5000
 ];
 
 let entries = [];
 
 const probabilityMap = {
-  200: 200,
-  300: 300,
-  400: 400,
-  500: 500,
-  600: 600,
-  700: 700,
-  800: 800,
-  900: 900,
-  1000: 1000,
-  1500: 1500,
-  2000: 2000,
-  3000: 3000,
-  4000: 4000,
-  5000: 5000
+200:200,300:300,400:400,500:500,600:600,700:700,
+800:800,900:900,1000:1000,1500:1500,2000:2000,
+3000:3000,4000:4000,5000:5000
 };
 
 function save(){
-  localStorage.setItem("limbo_v9", JSON.stringify(entries));
+  localStorage.setItem("limbo_v10", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v9");
+  let data = localStorage.getItem("limbo_v10");
   if(data) entries = JSON.parse(data);
 }
 
@@ -151,7 +149,7 @@ function deleteLast(){
 function resetAll(){
   if(!confirm("Reset ALL data?")) return;
   entries = [];
-  localStorage.removeItem("limbo_v9");
+  localStorage.removeItem("limbo_v10");
   render();
   showStatus("🧨 Reset done");
 }
@@ -180,6 +178,7 @@ function buildStats(){
   return {data,current};
 }
 
+/* 🔥 HEAT LOGIC */
 function getHeat(hits, expected, current){
   let rate = hits ? current / hits : 0;
 
@@ -194,24 +193,46 @@ function render(){
 
   document.getElementById("roundText").innerText = "Round: " + current;
 
-  let html = "";
+  /* =========================
+     GRID BUTTON SECTION
+     ========================= */
+  let btnHTML = "";
 
   multipliers.forEach(m=>{
-    let expected = probabilityMap[m];
-    let color = getHeat(data[m].hits, expected, current);
+    let color = getHeat(data[m].hits, probabilityMap[m], current);
 
-    html += `
-      <div class="btnWrap">
-
+    btnHTML += `
+      <div class="cell">
         <button onclick="addEntry(${m})">${m}x</button>
-
         <div class="heat ${color}"></div>
-
       </div>
     `;
   });
 
-  document.getElementById("buttons").innerHTML = html;
+  document.getElementById("buttons").innerHTML = btnHTML;
+
+  /* =========================
+     FULL STATS SECTION (RESTORED)
+     ========================= */
+  let statsHTML = "";
+
+  multipliers.forEach(m=>{
+    let expected = probabilityMap[m];
+    let total = data[m].hits + data[m].misses;
+    let actualRate = data[m].hits ? (total / data[m].hits).toFixed(0) : "-";
+
+    statsHTML += `
+      <div class="card">
+        <b>${m}x</b><br>
+        Hits: ${data[m].hits}<br>
+        Misses: ${data[m].misses}<br>
+        Expected: 1/${expected}<br>
+        Actual: ~1/${actualRate}
+      </div>
+    `;
+  });
+
+  document.getElementById("dashboard").innerHTML = statsHTML;
 }
 
 load();
