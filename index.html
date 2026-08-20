@@ -2,14 +2,14 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Limbo Tracker</title>
+<title>Limbo Analytics Pro</title>
 
 <style>
 body {
   font-family: Arial;
-  background: #0f172a;
+  background: #0b1220;
   color: white;
-  padding: 15px;
+  padding: 14px;
 }
 
 h2 { text-align: center; }
@@ -17,17 +17,17 @@ h2 { text-align: center; }
 input {
   width: 100%;
   padding: 12px;
-  margin: 5px 0;
-  border-radius: 8px;
+  margin: 6px 0;
+  border-radius: 10px;
   border: none;
 }
 
 button {
-  padding: 12px;
-  margin: 5px;
+  padding: 10px;
+  margin: 4px;
   border-radius: 10px;
   border: none;
-  background: #1e293b;
+  background: #1f2937;
   color: white;
   font-weight: bold;
 }
@@ -40,55 +40,73 @@ button {
 }
 
 .card {
-  background: #1e293b;
+  background: #111827;
   padding: 10px;
   border-radius: 10px;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
-.highlight {
-  color: #22c55e;
-  font-weight: bold;
-}
+.good { color: #22c55e; }
+.bad { color: #ef4444; }
 
-.small {
-  font-size: 12px;
-  opacity: 0.8;
+canvas {
+  background: #0f172a;
+  border-radius: 10px;
+  margin-top: 10px;
 }
 </style>
 </head>
 
 <body>
 
-<h2>🎯 Limbo Tracker</h2>
+<h2>🎯 Limbo Analytics Pro</h2>
 
 <input id="roundInput" type="number" placeholder="Enter Round Number">
 
 <div class="grid" id="buttons"></div>
 
-<button onclick="deleteLast()">🗑️ Delete Last Entry</button>
+<button onclick="deleteLast()">🗑️ Delete Last</button>
 
 <h3 id="roundText">Round: 0</h3>
 
-<div id="stats"></div>
+<canvas id="chart" height="200"></canvas>
+
+<div id="dashboard"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
 <script>
 let multipliers = [
-100,200,300,400,500,600,700,800,900,1000,
+200,300,400,500,600,700,800,900,1000,
 1500,2000,3000,4000,5000
 ];
 
 let entries = [];
 
+const probabilityMap = {
+  200: 200,
+  300: 300,
+  400: 400,
+  500: 500,
+  600: 600,
+  700: 700,
+  800: 800,
+  900: 900,
+  1000: 1000,
+  1500: 1500,
+  2000: 2000,
+  3000: 3000,
+  4000: 4000,
+  5000: 5000
+};
+
 function save(){
-  localStorage.setItem("limbo_entries", JSON.stringify(entries));
+  localStorage.setItem("limbo_v2", JSON.stringify(entries));
 }
 
 function load(){
-  let saved = localStorage.getItem("limbo_entries");
-  if(saved){
-    entries = JSON.parse(saved);
-  }
+  let data = localStorage.getItem("limbo_v2");
+  if(data) entries = JSON.parse(data);
 }
 
 function addEntry(m){
@@ -101,51 +119,98 @@ function addEntry(m){
 }
 
 function deleteLast(){
-  if(entries.length === 0) return;
   entries.pop();
   save();
   render();
 }
 
-function render(){
-
+function buildStats(){
   let data = {};
-  let currentRound = 0;
+  let current = 0;
 
   multipliers.forEach(m=>{
-    data[m] = {hits:0,last:0};
+    data[m] = {hits:0,last:0,history:[]};
   });
 
   entries.forEach(e=>{
-    currentRound = e.round;
+    current = e.round;
 
     multipliers.forEach(m=>{
       if(e.multi >= m){
         data[m].hits++;
         data[m].last = e.round;
+        data[m].history.push(e.round);
       }
     });
   });
 
-  document.getElementById("roundText").innerText = "Round: " + currentRound;
+  return {data,current};
+}
+
+function renderChart(dataObj){
+  let labels = multipliers;
+  let values = multipliers.map(m => dataObj[m].hits);
+
+  new Chart(document.getElementById("chart"), {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Hits',
+        data: values,
+        borderColor: '#22c55e',
+        backgroundColor: '#22c55e'
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false }
+      }
+    }
+  });
+}
+
+function render(){
+
+  let {data, current} = buildStats();
+
+  document.getElementById("roundText").innerText = "Round: " + current;
+
+  renderChart(data);
 
   let html = "";
 
   multipliers.forEach(m=>{
     let last = data[m].last;
-    let ago = last ? currentRound - last : "-";
+    let ago = last ? current - last : "-";
+
+    let expected = probabilityMap[m];
+
+    let actualRate = data[m].hits ? (current / data[m].hits).toFixed(0) : "-";
+
+    let status = data[m].hits && actualRate > expected
+      ? "bad"
+      : "good";
 
     html += `
       <div class="card">
         <b>${m}x</b><br>
         Hits: ${data[m].hits}<br>
         Last: ${last || "-"}<br>
-        <span class="highlight">Ago: ${ago}</span>
+        Ago: ${ago}<br><br>
+
+        Expected: 1 / ${expected} rounds<br>
+        Actual: ~1 / ${actualRate} rounds<br>
+
+        <span class="${status}">
+          ${status === "good" ? "Within expectation" : "Above expected variance"}
+        </span>
       </div>
     `;
   });
 
-  document.getElementById("stats").innerHTML = html;
+  document.getElementById("dashboard").innerHTML = html;
 }
 
 function createButtons(){
