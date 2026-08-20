@@ -52,7 +52,7 @@ button:hover {
   transition: all 0.3s ease;
 }
 
-/* HEAT MAP COLORS - Based on variance threshold of 7 */
+/* HEAT MAP COLORS - Based on variance percentage */
 .heat-under-severe { 
   background: #7f1d1d; /* Dark Red - Very under expected variance */
   border-left: 4px solid #dc2626;
@@ -129,6 +129,10 @@ button:hover {
   padding: 2px 8px;
   border-radius: 10px;
   font-size: 11px;
+}
+
+.button-highlight {
+  background: #3b82f6 !important;
 }
 </style>
 </head>
@@ -239,10 +243,10 @@ function buildStats(){
     return {data, current: 0};
   }
 
-  // Get the last round (no limit, goes as high as the user inputs)
+  // Get the last round
   current = entries[entries.length - 1].round;
 
-  // Process each round from 1 to current (unlimited)
+  // Process each round from 1 to current
   let entryIndex = 0;
   
   for(let round = 1; round <= current; round++) {
@@ -271,16 +275,20 @@ function buildStats(){
   return {data, current};
 }
 
-function getHeatMapClass(variance) {
+function getHeatMapClass(variance, totalRounds) {
   if (variance === "-") return "heat-perfect";
   
   let v = parseFloat(variance);
   
-  if (v >= 7) return "heat-under-severe";      // Dark Red - Very under expected
-  if (v >= 3) return "heat-under-mild";        // Red - Under expected
-  if (v <= -7) return "heat-above-severe";     // Bright Yellow - Very above expected
-  if (v <= -3) return "heat-above-mild";       // Dark Yellow - Just above expected
-  return "heat-perfect";                        // Green - Within expected variance
+  // Calculate variance as percentage of total rounds
+  let variancePercent = totalRounds > 0 ? (v / totalRounds) * 100 : 0;
+  
+  // Use percentage-based thresholds
+  if (variancePercent > 1) return "heat-under-severe";      // Dark Red - Very under expected
+  if (variancePercent > 0.5) return "heat-under-mild";      // Red - Under expected
+  if (variancePercent < -1) return "heat-above-severe";     // Bright Yellow - Very above expected
+  if (variancePercent < -0.5) return "heat-above-mild";     // Dark Yellow - Just above expected
+  return "heat-perfect";                                    // Green - Within expected variance
 }
 
 function render(){
@@ -299,7 +307,7 @@ function render(){
         📊 Total Rounds: <b>${current.toLocaleString()}</b> | 
         Entries: <b>${entries.length}</b> | 
         Range: <b>1 - ${current.toLocaleString()}</b>
-        ${current > 0 ? `<span class="range-badge">All rounds automatically counted (unlimited)</span>` : ''}
+        ${current > 0 ? `<span class="range-badge">All rounds automatically counted</span>` : ''}
       </div>
     `;
   }
@@ -311,7 +319,7 @@ function render(){
     let expected = probabilityMap[m];
     let total = data[m].totalRounds;
     
-    // Calculate expected hits as fraction
+    // Calculate expected hits
     let expectedHits = total / expected;
     let actualHits = data[m].hits;
     
@@ -321,31 +329,34 @@ function render(){
     if (total > 0) {
       let diff = actualHits - expectedHits;
       variance = diff;
-      varianceDisplay = diff.toFixed(2);
+      varianceDisplay = diff.toFixed(4);
     }
     
-    // Determine heat map color
-    let heatClass = getHeatMapClass(variance);
+    // Calculate variance as percentage
+    let variancePercent = total > 0 ? ((variance !== "-" ? parseFloat(variance) : 0) / total * 100) : 0;
     
-    // Status label based on variance
+    // Determine heat map color
+    let heatClass = getHeatMapClass(variance, total);
+    
+    // Status label based on variance percentage
     let statusClass, statusLabel, statusIcon;
     if (total === 0) {
       statusClass = "good";
       statusLabel = "No data yet";
       statusIcon = "⚪";
-    } else if (variance >= 7) {
+    } else if (variancePercent > 1) {
       statusClass = "critical";
       statusLabel = "🔴 Very Under Expected";
       statusIcon = "🔴";
-    } else if (variance >= 3) {
+    } else if (variancePercent > 0.5) {
       statusClass = "bad";
       statusLabel = "🟠 Under Expected";
       statusIcon = "🟠";
-    } else if (variance <= -7) {
+    } else if (variancePercent < -1) {
       statusClass = "warning";
       statusLabel = "🟡 Very Above Expected";
       statusIcon = "🟡";
-    } else if (variance <= -3) {
+    } else if (variancePercent < -0.5) {
       statusClass = "warning";
       statusLabel = "🟨 Above Expected";
       statusIcon = "🟨";
