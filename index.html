@@ -163,7 +163,7 @@ button:hover {
 
 <div class="input-row">
   <input id="roundInput" type="number" placeholder="Enter Round Number">
-  <button onclick="addEntryManually()">➕ Add Round</button>
+  <button onclick="addRoundOnly()">➕ Add Round</button>
 </div>
 
 <div class="grid" id="buttons"></div>
@@ -216,20 +216,23 @@ function load(){
   if(data) entries = JSON.parse(data);
 }
 
-function addEntryManually(){
+function addRoundOnly(){
   let r = parseInt(document.getElementById("roundInput").value);
   if(!r) return alert("Enter round number");
   if(r <= 0) return alert("Round must be greater than 0");
   
-  let multi = prompt("Enter multiplier for round " + r + " (200-5000):", "1000");
-  if(multi === null) return;
-  multi = parseInt(multi);
-  if(!multipliers.includes(multi)) {
-    alert("Invalid multiplier. Choose from: " + multipliers.join(", "));
-    return;
+  // Check if we already have this round
+  if(entries.some(e => e.round === r)) {
+    return alert("Round " + r + " already exists! Delete it first or use a different round.");
   }
-  
-  addEntry(r, multi);
+
+  // Add round with no hit (null)
+  entries.push({round:r, multi:null});
+  entries.sort((a,b) => a.round - b.round);
+  save();
+  render();
+  document.getElementById("roundInput").value = "";
+  document.getElementById("roundInput").focus();
 }
 
 function addEntry(hitMulti){
@@ -404,6 +407,22 @@ function render(){
       statusClass = "good";
       statusLabel = "No data yet";
       statusIcon = "⚪";
+    } else if (actualHits === 0) {
+      // No hits - check if expected hits is very low
+      let expectedHitsCalc = total / expected;
+      if (expectedHitsCalc < 0.5) {
+        statusClass = "good";
+        statusLabel = "✅ Within Expected";
+        statusIcon = "✅";
+      } else if (expectedHitsCalc < 2) {
+        statusClass = "bad";
+        statusLabel = "🟠 Under Expected";
+        statusIcon = "🟠";
+      } else {
+        statusClass = "critical";
+        statusLabel = "🔴 Very Under Expected";
+        statusIcon = "🔴";
+      }
     } else if (ratio > 5.0) {
       statusClass = "critical";
       statusLabel = "🔴 Very Under Expected";
@@ -476,7 +495,7 @@ function createButtons(){
 // Enter key support
 document.getElementById("roundInput").addEventListener("keypress", function(e) {
   if (e.key === "Enter") {
-    addEntryManually();
+    addRoundOnly();
   }
 });
 
