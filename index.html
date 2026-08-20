@@ -22,31 +22,40 @@ input {
   border: none;
 }
 
+/* 🔥 HORIZONTAL SCROLL BAR */
+.buttonBar {
+  display: flex;
+  overflow-x: auto;
+  gap: 8px;
+  padding: 10px 4px;
+  white-space: nowrap;
+}
+
+.btnWrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: #111827;
+  padding: 8px;
+  border-radius: 10px;
+  flex: 0 0 auto;
+}
+
+/* BUTTON */
 button {
-  padding: 10px;
-  margin: 4px;
+  padding: 10px 14px;
   border-radius: 10px;
   border: none;
   background: #1f2937;
   color: white;
   font-weight: bold;
+  flex: 0 0 auto;
 }
 
-/* 🔥 BUTTON + HEAT WRAPPER */
-.btnWrap {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #111827;
-  padding: 8px;
-  margin: 4px;
-  border-radius: 10px;
-}
-
-/* Heat square */
+/* HEAT SQUARE */
 .heat {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 3px;
 }
 
@@ -54,9 +63,10 @@ button {
 .yellow { background: #facc15; }
 .red { background: #ef4444; }
 
-.grid {
-  display: flex;
-  flex-direction: column;
+#status {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 6px;
 }
 </style>
 </head>
@@ -67,11 +77,11 @@ button {
 
 <input id="roundInput" type="number" placeholder="Enter Round Number">
 
-<div id="buttons"></div>
+<div class="buttonBar" id="buttons"></div>
 
 <button onclick="deleteLast()">🗑️ Delete Last</button>
 <button onclick="manualSave()">💾 Save Progress</button>
-<button onclick="resetAll()">🧨 Reset Everything</button>
+<button onclick="resetAll()">🧨 Reset</button>
 
 <div id="status"></div>
 
@@ -105,11 +115,11 @@ const probabilityMap = {
 };
 
 function save(){
-  localStorage.setItem("limbo_v8", JSON.stringify(entries));
+  localStorage.setItem("limbo_v9", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v8");
+  let data = localStorage.getItem("limbo_v9");
   if(data) entries = JSON.parse(data);
 }
 
@@ -141,7 +151,7 @@ function deleteLast(){
 function resetAll(){
   if(!confirm("Reset ALL data?")) return;
   entries = [];
-  localStorage.removeItem("limbo_v8");
+  localStorage.removeItem("limbo_v9");
   render();
   showStatus("🧨 Reset done");
 }
