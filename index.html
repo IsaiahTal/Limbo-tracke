@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limbo Tracker</title>
+
+<style>
+body {
+  font-family: Arial;
+  background: #0f172a;
+  color: white;
+  padding: 15px;
+}
+h2 { text-align: center; }
+
+input {
+  width: 100%;
+  padding: 12px;
+  margin: 5px 0;
+  border-radius: 8px;
+  border: none;
+}
+
+button {
+  padding: 12px;
+  margin: 5px;
+  border-radius: 10px;
+  border: none;
+  background: #1e293b;
+  color: white;
+  font-weight: bold;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.card {
+  background: #1e293b;
+  padding: 12px;
+  border-radius: 10px;
+  margin-top: 8px;
+}
+
+.highlight {
+  color: #22c55e;
+  font-weight: bold;
+}
+</style>
+</head>
+
+<body>
+
+<h2>🎯 Limbo Tracker</h2>
+
+<input id="roundInput" placeholder="Enter Round Number (e.g. 1900)" type="number">
+
+<div class="grid" id="buttons"></div>
+
+<h3 id="roundText">Round: 0</h3>
+
+<div id="stats"></div>
+
+<script>
+let multipliers = [
+100,200,300,400,500,600,700,800,900,1000,
+1500,2000,3000,4000,5000
+];
+
+let data = {};
+let currentRound = 0;
+let lastRound = 0;
+
+multipliers.forEach(m=>{
+  data[m] = {hits:0,last:0};
+});
+
+function save() {
+  localStorage.setItem("limboData", JSON.stringify({data,currentRound,lastRound}));
+}
+
+function load() {
+  let saved = JSON.parse(localStorage.getItem("limboData"));
+  if(saved){
+    data = saved.data;
+    currentRound = saved.currentRound;
+    lastRound = saved.lastRound;
+  }
+}
+
+function clickMulti(m){
+  let r = parseInt(document.getElementById("roundInput").value);
+  if(!r) return alert("Enter round number");
+
+  let gap = r - lastRound;
+  if(gap < 0) return alert("Round must increase");
+
+  currentRound += gap;
+
+  multipliers.forEach(x=>{
+    if(m >= x){
+      data[x].hits++;
+      data[x].last = r;
+    }
+  });
+
+  lastRound = r;
+
+  save();
+  render();
+}
+
+function render(){
+  document.getElementById("roundText").innerText = "Round: " + currentRound;
+
+  let stats = "";
+  multipliers.forEach(m=>{
+    let last = data[m].last;
+    let ago = last ? currentRound - last : "-";
+
+    stats += `
+      <div class="card">
+        <b>${m}x</b><br>
+        Hits: ${data[m].hits}<br>
+        Last: ${last || "-"}<br>
+        <span class="highlight">Ago: ${ago}</span>
+      </div>
+    `;
+  });
+
+  document.getElementById("stats").innerHTML = stats;
+}
+
+function createButtons(){
+  let html = "";
+  multipliers.forEach(m=>{
+    html += `<button onclick="clickMulti(${m})">${m}x</button>`;
+  });
+  document.getElementById("buttons").innerHTML = html;
+}
+
+load();
+createButtons();
+render();
+</script>
+
+</body>
+</html>
