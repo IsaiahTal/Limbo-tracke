@@ -20,6 +20,7 @@ input {
   margin: 6px 0;
   border-radius: 10px;
   border: none;
+  font-size: 16px;
 }
 
 button {
@@ -134,6 +135,25 @@ button:hover {
   border-radius: 10px;
   font-size: 11px;
 }
+
+.input-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.input-row input {
+  flex: 1;
+}
+
+.input-row button {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 12px 20px;
+  background: #3b82f6;
+  border-color: #3b82f6;
+}
 </style>
 </head>
 
@@ -141,7 +161,10 @@ button:hover {
 
 <h2>🎯 Limbo Analytics Pro</h2>
 
-<input id="roundInput" type="number" placeholder="Enter Round Number">
+<div class="input-row">
+  <input id="roundInput" type="number" placeholder="Enter Round Number">
+  <button onclick="addEntryManually()">➕ Add Round</button>
+</div>
 
 <div class="grid" id="buttons"></div>
 
@@ -166,6 +189,7 @@ let multipliers = [
 ];
 
 let entries = [];
+let pendingMulti = null;
 
 const probabilityMap = {
   200: 200,
@@ -193,21 +217,38 @@ function load(){
   if(data) entries = JSON.parse(data);
 }
 
+function addEntryManually(){
+  let r = parseInt(document.getElementById("roundInput").value);
+  if(!r) return alert("Enter round number");
+  if(r <= 0) return alert("Round must be greater than 0");
+  
+  // Show popup to select multiplier
+  let multi = prompt("Enter multiplier for round " + r + " (200-5000):", "1000");
+  if(multi === null) return; // User cancelled
+  multi = parseInt(multi);
+  if(!multipliers.includes(multi)) {
+    alert("Invalid multiplier. Choose from: " + multipliers.join(", "));
+    return;
+  }
+  
+  addEntry(r, multi);
+}
+
 function addEntry(hitMulti){
   let r = parseInt(document.getElementById("roundInput").value);
   if(!r) return alert("Enter round number");
   if(r <= 0) return alert("Round must be greater than 0");
   
-  // Check if we already have this round
   if(entries.some(e => e.round === r)) {
     return alert("Round " + r + " already exists! Delete it first or use a different round.");
   }
 
   entries.push({round:r, multi:hitMulti});
-  // Sort entries by round number
   entries.sort((a,b) => a.round - b.round);
   save();
   render();
+  document.getElementById("roundInput").value = "";
+  document.getElementById("roundInput").focus();
 }
 
 function deleteLast(){
@@ -243,30 +284,24 @@ function buildStats(){
     return {data, current: 0};
   }
 
-  // Get the last round
   current = entries[entries.length - 1].round;
 
-  // Process each round from 1 to current
   let entryIndex = 0;
   
   for(let round = 1; round <= current; round++) {
-    // Check if this round has a hit
     let hitMulti = null;
     if(entryIndex < entries.length && entries[entryIndex].round === round) {
       hitMulti = entries[entryIndex].multi;
       entryIndex++;
     }
 
-    // Process all multipliers for this round
     multipliers.forEach(m => {
       data[m].totalRounds++;
       
       if(hitMulti !== null && hitMulti >= m) {
-        // Hit for this multiplier
         data[m].hits++;
         data[m].lastHit = round;
       } else {
-        // Miss for this multiplier
         data[m].misses++;
       }
     });
@@ -275,21 +310,32 @@ function buildStats(){
   return {data, current};
 }
 
-function getHeatMapType(variance, totalRounds) {
-  if (variance === "-") return "perfect";
+function getHeatMapType(totalRounds, actualHits, multiplier) {
+  if (totalRounds === 0) return "perfect";
   
-  let v = parseFloat(variance);
+  if (actualHits === 0) {
+    let expectedHits = totalRounds / multiplier;
+    if (expectedHits < 0.5) return "perfect";
+    if (expectedHits < 2) return "under-mild";
+    return "under-severe";
+  }
   
-  // Calculate variance as percentage of total rounds
-  let variancePercent = totalRounds > 0 ? (v / totalRounds) * 100 : 0;
+  let actualRoundsPerHit = totalRounds / actualHits;
+  let expectedRoundsPerHit = multiplier;
+  let ratio = actualRoundsPerHit / expectedRoundsPerHit;
   
-  // FIXED: Positive variance = MORE hits than expected = Above Expected (Yellow)
-  // Negative variance = FEWER hits than expected = Under Expected (Red)
-  if (variancePercent > 1) return "above-severe";      // Bright Yellow - Very above expected
-  if (variancePercent > 0.5) return "above-mild";      // Dark Yellow - Just above expected
-  if (variancePercent < -1) return "under-severe";     // Dark Red - Very under expected
-  if (variancePercent < -0.5) return "under-mild";     // Red - Under expected
-  return "perfect";                                    // Green - Within expected variance
+  // Your exact thresholds:
+  // Ratio > 5.0 → Very Under Expected (Dark Red)
+  // Ratio > 2.0 → Under Expected (Red)
+  // Ratio < 0.5 → Very Above Expected (Bright Yellow)
+  // Ratio < 2.0 → Above Expected (Dark Yellow)
+  // Else → Within Expected (Green)
+  
+  if (ratio > 5.0) return "under-severe";      // Very Under Expected 🔴
+  if (ratio > 2.0) return "under-mild";        // Under Expected 🟠
+  if (ratio < 0.5) return "above-severe";      // Very Above Expected 🟡
+  if (ratio < 2.0) return "above-mild";        // Above Expected 🟨
+  return "perfect";                            // Within Expected 🟢
 }
 
 function getButtonClass(heatType) {
@@ -310,14 +356,12 @@ function render(){
   document.getElementById("roundText").innerText = current;
   document.getElementById("entryCount").innerText = entries.length;
 
-  // Update the button grid with heat map colors on entire buttons
+  // Update buttons with heat map colors
   let buttonHtml = "";
   multipliers.forEach(m=>{
     let total = data[m].totalRounds;
-    let expectedHits = total / probabilityMap[m];
     let actualHits = data[m].hits;
-    let variance = total > 0 ? actualHits - expectedHits : "-";
-    let heatType = getHeatMapType(variance, total);
+    let heatType = getHeatMapType(total, actualHits, m);
     let btnClass = getButtonClass(heatType);
     
     buttonHtml += `
@@ -328,10 +372,9 @@ function render(){
   });
   document.getElementById("buttons").innerHTML = buttonHtml;
 
-  // Render dashboard cards WITHOUT heat map colors
+  // Render dashboard cards
   let html = "";
 
-  // Show info about rounds
   if(entries.length > 0) {
     html += `
       <div class="info-box">
@@ -349,52 +392,42 @@ function render(){
 
     let expected = probabilityMap[m];
     let total = data[m].totalRounds;
-    
-    // Calculate expected hits
-    let expectedHits = total / expected;
     let actualHits = data[m].hits;
     
-    // Calculate variance
-    let variance = "-";
-    let varianceDisplay = "-";
-    if (total > 0) {
-      let diff = actualHits - expectedHits;
-      variance = diff;
-      varianceDisplay = diff.toFixed(4);
-    }
+    let expectedHits = total / expected;
+    let variance = total > 0 ? actualHits - expectedHits : "-";
+    let varianceDisplay = variance !== "-" ? variance.toFixed(4) : "-";
     
-    // Calculate variance as percentage
-    let variancePercent = total > 0 ? ((variance !== "-" ? parseFloat(variance) : 0) / total * 100) : 0;
+    let actualRoundsPerHit = actualHits > 0 ? (total / actualHits).toFixed(0) : "∞";
+    let ratio = actualHits > 0 ? (total / actualHits) / expected : Infinity;
     
-    // Status label based on variance percentage
     let statusClass, statusLabel, statusIcon;
     if (total === 0) {
       statusClass = "good";
       statusLabel = "No data yet";
       statusIcon = "⚪";
-    } else if (variancePercent > 1) {
-      statusClass = "warning";
-      statusLabel = "🟡 Very Above Expected";
-      statusIcon = "🟡";
-    } else if (variancePercent > 0.5) {
-      statusClass = "warning";
-      statusLabel = "🟨 Above Expected";
-      statusIcon = "🟨";
-    } else if (variancePercent < -1) {
+    } else if (ratio > 5.0) {
       statusClass = "critical";
       statusLabel = "🔴 Very Under Expected";
       statusIcon = "🔴";
-    } else if (variancePercent < -0.5) {
+    } else if (ratio > 2.0) {
       statusClass = "bad";
       statusLabel = "🟠 Under Expected";
       statusIcon = "🟠";
+    } else if (ratio < 0.5) {
+      statusClass = "warning";
+      statusLabel = "🟡 Very Above Expected";
+      statusIcon = "🟡";
+    } else if (ratio < 2.0) {
+      statusClass = "warning";
+      statusLabel = "🟨 Above Expected";
+      statusIcon = "🟨";
     } else {
       statusClass = "good";
       statusLabel = "✅ Within Expected";
       statusIcon = "✅";
     }
 
-    // Calculate percentages
     let hitPercentage = total > 0 ? (actualHits/total*100).toFixed(2) : 0;
     let expectedPercentage = (1/expected*100).toFixed(4);
 
@@ -425,10 +458,8 @@ function render(){
           <span class="${statusClass}">
             ${statusLabel}
           </span>
-          ${variance !== "-" ? `<span class="variance-badge">Variance: ${varianceDisplay}</span>` : ''}
+          ${actualHits > 0 ? `<span class="variance-badge">1/${actualRoundsPerHit} rounds</span>` : ''}
         </div>
-        
-        ${data[m].hits > 0 ? `<div class="small" style="margin-top:4px; opacity:0.6;">Hit rate: 1/${(total/actualHits).toFixed(0)}</div>` : ''}
       </div>
     `;
   });
@@ -437,13 +468,19 @@ function render(){
 }
 
 function createButtons(){
-  // Initial button creation without colors
   let html = "";
   multipliers.forEach(m=>{
     html += `<button onclick="addEntry(${m})">${m}x</button>`;
   });
   document.getElementById("buttons").innerHTML = html;
 }
+
+// Enter key support
+document.getElementById("roundInput").addEventListener("keypress", function(e) {
+  if (e.key === "Enter") {
+    addEntryManually();
+  }
+});
 
 load();
 createButtons();
