@@ -40,6 +40,7 @@ input {
   align-items: center;
 }
 
+/* BUTTON */
 button {
   padding: 8px;
   border-radius: 8px;
@@ -61,18 +62,18 @@ button {
 .yellow { background: #facc15; }
 .red { background: #ef4444; }
 
-#status {
-  font-size: 12px;
-  opacity: 0.8;
-  margin-top: 6px;
-}
-
 .card {
   background: #111827;
   padding: 10px;
   border-radius: 10px;
   margin-top: 10px;
   font-size: 13px;
+}
+
+#status {
+  font-size: 12px;
+  opacity: 0.8;
+  margin-top: 6px;
 }
 </style>
 </head>
@@ -86,8 +87,8 @@ button {
 <div class="grid" id="buttons"></div>
 
 <button onclick="deleteLast()">🗑️ Delete Last</button>
-<button onclick="manualSave()">💾 Save Progress</button>
-<button onclick="resetAll()">🧨 Reset Everything</button>
+<button onclick="manualSave()">💾 Save</button>
+<button onclick="resetAll()">🧨 Reset</button>
 
 <div id="status"></div>
 
@@ -106,11 +107,11 @@ let multipliers = [
 let entries = [];
 
 function save(){
-  localStorage.setItem("limbo_v15", JSON.stringify(entries));
+  localStorage.setItem("limbo_v16", JSON.stringify(entries));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v15");
+  let data = localStorage.getItem("limbo_v16");
   if(data) entries = JSON.parse(data);
 }
 
@@ -142,9 +143,8 @@ function deleteLast(){
 function resetAll(){
   if(!confirm("Reset EVERYTHING?")) return;
   entries = [];
-  localStorage.removeItem("limbo_v15");
+  localStorage.removeItem("limbo_v16");
   render();
-  showStatus("🧨 Reset complete");
 }
 
 /* STATS */
@@ -167,13 +167,13 @@ function buildStats(){
   return {data, rounds};
 }
 
-/* FINAL CORRECT HEAT LOGIC */
-function getHeat(hits, expected, rounds){
+/* FINAL CORRECT HEAT */
+function getHeat(hits, m, rounds){
 
-  let expectedHits = rounds / expected;
+  let expectedHits = rounds / m;
 
-  /* 🟩 LOW DATA ZONE (NOT ALL GREEN ANYMORE) */
-  if(expectedHits < 0.5){
+  // low data zone
+  if(expectedHits < 1){
     return "green";
   }
 
@@ -188,6 +188,11 @@ function getHeat(hits, expected, rounds){
   }
 
   return "red";
+}
+
+/* FORMAT 1/XXX */
+function formatExpected(m){
+  return `1/${m}`;
 }
 
 function render(){
@@ -214,13 +219,11 @@ function render(){
   let statsHTML = "";
 
   multipliers.forEach(m=>{
-    let expectedHits = rounds / m;
-
     statsHTML += `
       <div class="card">
         <b>${m}x</b><br>
         Hits: ${data[m].hits}<br>
-        Expected hits: ${expectedHits.toFixed(3)}<br>
+        Expected: ${formatExpected(m)}
       </div>
     `;
   });
