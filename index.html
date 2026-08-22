@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 85px;
+  min-height: 95px;
   position: relative;
   overflow: hidden;
   transform-origin: center;
@@ -234,6 +234,8 @@ button:active {
   font-size: 9px;
   opacity: 0.6;
   margin-top: 1px;
+  text-align: center;
+  line-height: 1.2;
 }
 
 /* BAR STYLES */
@@ -282,6 +284,12 @@ button:active {
 .pct-low { color: #ef4444; }
 .pct-medium { color: #eab308; }
 .pct-high { color: #22c55e; }
+
+.accuracy-badge {
+  font-size: 8px;
+  opacity: 0.5;
+  margin-top: 1px;
+}
 </style>
 </head>
 
@@ -318,6 +326,7 @@ let multipliers = [
 ];
 
 let entries = [];
+let predictionHistory = [];
 
 const probabilityMap = {
   200: 200,
@@ -344,11 +353,15 @@ const probabilityMap = {
 
 function save(){
   localStorage.setItem("limbo_v4", JSON.stringify(entries));
+  localStorage.setItem("limbo_predictions_v4", JSON.stringify(predictionHistory));
 }
 
 function load(){
   let data = localStorage.getItem("limbo_v4");
   if(data) entries = JSON.parse(data);
+  
+  let predData = localStorage.getItem("limbo_predictions_v4");
+  if(predData) predictionHistory = JSON.parse(predData);
 }
 
 function addRoundOnly(){
@@ -377,6 +390,9 @@ function addEntry(hitMulti){
     return alert("Round " + r + " already exists! Delete it first or use a different round.");
   }
 
+  // Record predictions before adding the new entry
+  recordPredictions(r);
+  
   entries.push({round:r, multi:hitMulti});
   entries.sort((a,b) => a.round - b.round);
   save();
@@ -385,6 +401,98 @@ function addEntry(hitMulti){
   document.getElementById("roundInput").focus();
   
   animateButton(hitMulti);
+}
+
+function recordPredictions(round){
+  let {data, current} = buildStatsFromEntries(entries);
+  
+  multipliers.forEach(m => {
+    let total = data[m].totalRounds;
+    let actualHits = data[m].hits;
+    let lastHit = data[m].lastHit;
+    let hitRounds = data[m].hitRounds;
+    
+    let probability = calculateHitProbability(total, actualHits, lastHit, current, m, null);
+    
+    predictionHistory.push({
+      multiplier: m,
+      round: round,
+      prediction: probability,
+      actualHit: false, // Will be updated when we know
+      checked: false
+    });
+  });
+}
+
+function updatePredictions(currentRound){
+  // For each prediction, check if it hit within 200 rounds
+  predictionHistory.forEach(pred => {
+    if (!pred.checked && pred.round <= currentRound) {
+      // Check if this multiplier hit between pred.round and pred.round + 200
+      let hitFound = false;
+      
+      // Look through entries to see if this multiplier hit within 200 rounds
+      for (let i = 0; i < entries.length; i++) {
+        let entry = entries[i];
+        if (entry.round >= pred.round && entry.round <= pred.round + 200) {
+          // Check if this entry represents a hit for this multiplier
+          // (entry.multi >= pred.multiplier means this multiplier hit)
+          if (entry.multi !== null && entry.multi >= pred.multiplier) {
+            hitFound = true;
+            break;
+          }
+        }
+      }
+      
+      pred.actualHit = hitFound;
+      pred.checked = true;
+    }
+  });
+  
+  // Clean up old predictions (keep last 1000)
+  if (predictionHistory.length > 1000) {
+    predictionHistory = predictionHistory.slice(-1000);
+  }
+  
+  save();
+}
+
+function getAccuracyModifier(multiplier) {
+  // Get all predictions for this multiplier
+  let preds = predictionHistory.filter(p => p.multiplier === multiplier && p.checked);
+  
+  if (preds.length < 5) return 1.0; // Not enough data yet
+  
+  // Calculate accuracy
+  let totalError = 0;
+  let count = 0;
+  
+  preds.forEach(pred => {
+    // If predicted 80% and hit → good (error = 0)
+    // If predicted 80% and didn't hit → bad (error = 0.8)
+    let error = 0;
+    if (pred.actualHit) {
+      error = 1 - (pred.prediction / 100); // How far off from 100%
+    } else {
+      error = pred.prediction / 100; // How far off from 0%
+    }
+    totalError += error;
+    count++;
+  });
+  
+  let avgError = totalError / count;
+  
+  // Calculate modifier based on accuracy
+  // If avgError is high (bad at predicting), adjust more
+  // If avgError is low (good at predicting), adjust less
+  
+  // Target: If predictions are consistently wrong, adjust by up to 30%
+  let modifier = 1 + (avgError - 0.3) * 0.8;
+  
+  // Clamp modifier between 0.6 and 1.4
+  modifier = Math.max(0.6, Math.min(1.4, modifier));
+  
+  return modifier;
 }
 
 function animateButton(multiplier){
@@ -415,14 +523,15 @@ function deleteLast(){
 
 function clearAll(){
   if(entries.length === 0) return;
-  if(confirm("Clear all entries?")){
+  if(confirm("Clear all entries? (This will also clear prediction history)")){
     entries = [];
+    predictionHistory = [];
     save();
     render();
   }
 }
 
-function buildStats(){
+function buildStatsFromEntries(entriesData){
   let data = {};
   let current = 0;
 
@@ -436,18 +545,18 @@ function buildStats(){
     };
   });
 
-  if(entries.length === 0) {
+  if(entriesData.length === 0) {
     return {data, current: 0};
   }
 
-  current = entries[entries.length - 1].round;
+  current = entriesData[entriesData.length - 1].round;
 
   let entryIndex = 0;
   
   for(let round = 1; round <= current; round++) {
     let hitMulti = null;
-    if(entryIndex < entries.length && entries[entryIndex].round === round) {
-      hitMulti = entries[entryIndex].multi;
+    if(entryIndex < entriesData.length && entriesData[entryIndex].round === round) {
+      hitMulti = entriesData[entryIndex].multi;
       entryIndex++;
     }
 
@@ -465,6 +574,10 @@ function buildStats(){
   }
 
   return {data, current};
+}
+
+function buildStats(){
+  return buildStatsFromEntries(entries);
 }
 
 function getHitGaps(hitRounds) {
@@ -514,7 +627,11 @@ function getButtonClass(heatType) {
   }
 }
 
-function calculateHitProbability(totalRounds, actualHits, lastHit, current, multiplier) {
+function calculateHitProbability(totalRounds, actualHits, lastHit, current, multiplier, accuracyModifier) {
+  if (accuracyModifier === undefined || accuracyModifier === null) {
+    accuracyModifier = 1.0;
+  }
+  
   // Calculate expected hits
   let expectedHits = totalRounds / multiplier;
   
@@ -555,7 +672,7 @@ function calculateHitProbability(totalRounds, actualHits, lastHit, current, mult
   }
   
   // Step 4: Calculate final probability percentage
-  let finalProb = baseProb * modifier * actualRateImpact;
+  let finalProb = baseProb * modifier * actualRateImpact * accuracyModifier;
   
   // Convert to percentage and cap at 99%
   finalProb = Math.min(99, Math.round(finalProb * 100));
@@ -590,6 +707,12 @@ function getBarsAndColor(percentage) {
 
 function render(){
 
+  // First, update predictions with current data
+  if (entries.length > 0) {
+    let current = entries[entries.length - 1].round;
+    updatePredictions(current);
+  }
+  
   let {data, current} = buildStats();
 
   document.getElementById("roundText").innerText = current;
@@ -607,8 +730,11 @@ function render(){
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
-    // Calculate hit probability
-    let probability = calculateHitProbability(total, actualHits, lastHit, current, m);
+    // Get accuracy modifier based on past performance
+    let accuracyModifier = getAccuracyModifier(m);
+    
+    // Calculate hit probability with learning
+    let probability = calculateHitProbability(total, actualHits, lastHit, current, m, accuracyModifier);
     
     // Get bars and colors based on probability
     let barResult = getBarsAndColor(probability);
@@ -632,6 +758,31 @@ function render(){
     else if (probability <= 85) likelihood = 'Very Likely';
     else likelihood = 'Almost Certain';
     
+    // Get accuracy info
+    let preds = predictionHistory.filter(p => p.multiplier === m && p.checked);
+    let accuracyText = '';
+    if (preds.length >= 5) {
+      let correct = preds.filter(p => {
+        // Check if prediction was within 20% of actual
+        let predictedHigh = p.prediction >= 60;
+        if (predictedHigh && p.actualHit) return true;
+        if (!predictedHigh && !p.actualHit) return true;
+        return false;
+      }).length;
+      let accuracy = Math.round((correct / preds.length) * 100);
+      accuracyText = `📊 ${accuracy}% accuracy (${preds.length} predictions)`;
+    } else if (preds.length > 0) {
+      accuracyText = `📊 Learning... (${preds.length}/5 predictions)`;
+    }
+    
+    // Show modifier if active
+    let modifierText = '';
+    if (accuracyModifier !== 1.0 && preds.length >= 5) {
+      let mod = (accuracyModifier - 1) * 100;
+      if (mod > 0) modifierText = `⬆️ +${Math.round(mod)}% adjusted`;
+      else modifierText = `⬇️ ${Math.round(mod)}% adjusted`;
+    }
+    
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})" data-multiplier="${m}">
         <span class="button-label">${label}</span>
@@ -640,11 +791,13 @@ function render(){
         </div>
         <span class="bar-percentage ${pctClass}">${probability}%</span>
         <span class="button-sub">${likelihood} in next 200 rounds</span>
+        <span class="accuracy-badge">${accuracyText} ${modifierText}</span>
       </button>
     `;
   });
   document.getElementById("buttons").innerHTML = buttonHtml;
 
+  // Render dashboard cards
   let html = "";
 
   if(entries.length > 0) {
@@ -654,6 +807,8 @@ function render(){
         Entries: <b>${entries.length}</b> | 
         Range: <b>1 - ${current.toLocaleString()}</b>
         ${current > 0 ? `<span class="range-badge">All rounds automatically counted</span>` : ''}
+        ${predictionHistory.filter(p => p.checked).length > 0 ? 
+          `<span class="range-badge">🧠 ${predictionHistory.filter(p => p.checked).length} predictions learned</span>` : ''}
       </div>
     `;
   }
