@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 125px;
+  min-height: 145px;
   position: relative;
   overflow: hidden;
   transform-origin: center;
@@ -290,6 +290,13 @@ button:active {
   opacity: 0.5;
   margin-top: 1px;
 }
+
+.dry-type-badge {
+  font-size: 8px;
+  opacity: 0.7;
+  margin-top: 1px;
+  color: #facc15;
+}
 </style>
 </head>
 
@@ -320,6 +327,8 @@ button:active {
 
 <script>
 const TOTAL_ROUNDS = 500000;
+const HIGH_TIER_THRESHOLD = 500; // Multipliers >= 500 are considered "High Tier"
+
 let multipliers = [
 200,300,400,500,600,700,800,900,1000,
 1500,2000,3000,4000,5000,
@@ -329,6 +338,8 @@ let multipliers = [
 let entries = [];
 let predictionHistory = [];
 let hitIntervals = {};
+let sequencePatterns = {};
+let drySpellData = {};
 
 const probabilityMap = {
   200: 200,
@@ -354,14 +365,14 @@ const probabilityMap = {
 };
 
 function save(){
-  // Keep the original localStorage keys so existing data is preserved
   localStorage.setItem("limbo_v4", JSON.stringify(entries));
   localStorage.setItem("limbo_predictions_v4", JSON.stringify(predictionHistory));
   localStorage.setItem("limbo_intervals_v4", JSON.stringify(hitIntervals));
+  localStorage.setItem("limbo_sequence_v4", JSON.stringify(sequencePatterns));
+  localStorage.setItem("limbo_dryspell_v4", JSON.stringify(drySpellData));
 }
 
 function load(){
-  // Load from the original keys
   let data = localStorage.getItem("limbo_v4");
   if(data) entries = JSON.parse(data);
   
@@ -370,6 +381,12 @@ function load(){
   
   let intervalData = localStorage.getItem("limbo_intervals_v4");
   if(intervalData) hitIntervals = JSON.parse(intervalData);
+  
+  let seqData = localStorage.getItem("limbo_sequence_v4");
+  if(seqData) sequencePatterns = JSON.parse(seqData);
+  
+  let dryData = localStorage.getItem("limbo_dryspell_v4");
+  if(dryData) drySpellData = JSON.parse(dryData);
 }
 
 function addRoundOnly(){
@@ -406,6 +423,8 @@ function addEntry(hitMulti){
   entries.sort((a,b) => a.round - b.round);
   
   updateHitIntervals();
+  analyzeDrySpells();
+  analyzeSequences();
   
   save();
   render();
@@ -434,6 +453,248 @@ function recordPredictions(round){
       checked: false
     });
   });
+}
+
+function analyzeDrySpells(){
+  drySpellData = {
+    global: {
+      thresholds: [],
+      drySpells: [],
+      avgLength: 0,
+      minLength: Infinity,
+      maxLength: 0
+    },
+    highTier: {
+      thresholds: [],
+      drySpells: [],
+      avgLength: 0,
+      minLength: Infinity,
+      maxLength: 0
+    }
+  };
+  
+  if (entries.length < 5) return;
+  
+  let current = entries[entries.length - 1].round;
+  
+  // First pass: detect all dry spells
+  let globalDrySpells = [];
+  let highTierDrySpells = [];
+  
+  let entryIndex = 0;
+  let lastGlobalHit = 0;
+  let lastHighTierHit = 0;
+  let inGlobalDry = false;
+  let inHighTierDry = false;
+  let globalStart = 0;
+  let highTierStart = 0;
+  
+  // Track which multipliers hit in sequence after dry spells
+  let globalSequence = [];
+  let highTierSequence = [];
+  
+  for(let round = 1; round <= current; round++) {
+    let hitMulti = null;
+    if(entryIndex < entries.length && entries[entryIndex].round === round) {
+      hitMulti = entries[entryIndex].multi;
+      entryIndex++;
+    }
+    
+    // Global dry detection (ANY hit resets)
+    if(hitMulti !== null) {
+      if(inGlobalDry) {
+        let dryLength = round - globalStart;
+        if(dryLength > 100) { // Minimum threshold to record
+          globalDrySpells.push({
+            start: globalStart,
+            end: round,
+            length: dryLength,
+            firstHit: hitMulti,
+            sequence: [...globalSequence]
+          });
+        }
+        inGlobalDry = false;
+        globalSequence = [];
+      }
+      lastGlobalHit = round;
+      // Record sequence
+      multipliers.forEach(m => {
+        if(hitMulti >= m && !globalSequence.includes(m)) {
+          globalSequence.push(m);
+        }
+      });
+    } else {
+      if(!inGlobalDry && round - lastGlobalHit > 50) {
+        inGlobalDry = true;
+        globalStart = round;
+        globalSequence = [];
+      }
+    }
+    
+    // High-tier dry detection (only 500x+ hits reset)
+    if(hitMulti !== null && hitMulti >= HIGH_TIER_THRESHOLD) {
+      if(inHighTierDry) {
+        let dryLength = round - highTierStart;
+        if(dryLength > 200) {
+          highTierDrySpells.push({
+            start: highTierStart,
+            end: round,
+            length: dryLength,
+            firstHit: hitMulti,
+            sequence: [...highTierSequence]
+          });
+        }
+        inHighTierDry = false;
+        highTierSequence = [];
+      }
+      lastHighTierHit = round;
+      // Record sequence (only high-tier multipliers)
+      multipliers.forEach(m => {
+        if(hitMulti >= m && m >= HIGH_TIER_THRESHOLD && !highTierSequence.includes(m)) {
+          highTierSequence.push(m);
+        }
+      });
+    } else {
+      if(!inHighTierDry && round - lastHighTierHit > 100) {
+        inHighTierDry = true;
+        highTierStart = round;
+        highTierSequence = [];
+      }
+    }
+  }
+  
+  // Calculate dynamic thresholds from data
+  let globalAvg = 0;
+  if(globalDrySpells.length > 0) {
+    globalAvg = globalDrySpells.reduce((a,b) => a + b.length, 0) / globalDrySpells.length;
+  }
+  
+  let highTierAvg = 0;
+  if(highTierDrySpells.length > 0) {
+    highTierAvg = highTierDrySpells.reduce((a,b) => a + b.length, 0) / highTierDrySpells.length;
+  }
+  
+  // Set thresholds: max(600, avg * 0.3) for global, max(1900, avg * 0.3) for high-tier
+  let globalThreshold = Math.max(600, globalAvg * 0.3);
+  let highTierThreshold = Math.max(1900, highTierAvg * 0.3);
+  
+  // Filter dry spells by thresholds
+  let filteredGlobal = globalDrySpells.filter(s => s.length >= globalThreshold);
+  let filteredHighTier = highTierDrySpells.filter(s => s.length >= highTierThreshold);
+  
+  // Store results
+  drySpellData.global.threshold = Math.round(globalThreshold);
+  drySpellData.global.drySpells = filteredGlobal;
+  drySpellData.global.total = filteredGlobal.length;
+  drySpellData.global.avgLength = filteredGlobal.length > 0 ? 
+    Math.round(filteredGlobal.reduce((a,b) => a + b.length, 0) / filteredGlobal.length) : 0;
+  drySpellData.global.minLength = filteredGlobal.length > 0 ? 
+    Math.min(...filteredGlobal.map(s => s.length)) : 0;
+  drySpellData.global.maxLength = filteredGlobal.length > 0 ? 
+    Math.max(...filteredGlobal.map(s => s.length)) : 0;
+  
+  drySpellData.highTier.threshold = Math.round(highTierThreshold);
+  drySpellData.highTier.drySpells = filteredHighTier;
+  drySpellData.highTier.total = filteredHighTier.length;
+  drySpellData.highTier.avgLength = filteredHighTier.length > 0 ? 
+    Math.round(filteredHighTier.reduce((a,b) => a + b.length, 0) / filteredHighTier.length) : 0;
+  drySpellData.highTier.minLength = filteredHighTier.length > 0 ? 
+    Math.min(...filteredHighTier.map(s => s.length)) : 0;
+  drySpellData.highTier.maxLength = filteredHighTier.length > 0 ? 
+    Math.max(...filteredHighTier.map(s => s.length)) : 0;
+}
+
+function analyzeSequences(){
+  sequencePatterns = {};
+  multipliers.forEach(m => {
+    sequencePatterns[m] = {
+      globalFirst: 0,
+      globalSecond: 0,
+      globalThird: 0,
+      highTierFirst: 0,
+      highTierSecond: 0,
+      highTierThird: 0,
+      totalGlobal: 0,
+      totalHighTier: 0
+    };
+  });
+  
+  // Analyze global dry spells
+  if (drySpellData.global && drySpellData.global.drySpells) {
+    drySpellData.global.drySpells.forEach(spell => {
+      let seq = spell.sequence || [];
+      if(seq.length >= 1) {
+        sequencePatterns[seq[0]].globalFirst++;
+        sequencePatterns[seq[0]].totalGlobal++;
+      }
+      if(seq.length >= 2) {
+        sequencePatterns[seq[1]].globalSecond++;
+        sequencePatterns[seq[1]].totalGlobal++;
+      }
+      if(seq.length >= 3) {
+        sequencePatterns[seq[2]].globalThird++;
+        sequencePatterns[seq[2]].totalGlobal++;
+      }
+    });
+  }
+  
+  // Analyze high-tier dry spells
+  if (drySpellData.highTier && drySpellData.highTier.drySpells) {
+    drySpellData.highTier.drySpells.forEach(spell => {
+      let seq = spell.sequence || [];
+      if(seq.length >= 1) {
+        sequencePatterns[seq[0]].highTierFirst++;
+        sequencePatterns[seq[0]].totalHighTier++;
+      }
+      if(seq.length >= 2) {
+        sequencePatterns[seq[1]].highTierSecond++;
+        sequencePatterns[seq[1]].totalHighTier++;
+      }
+      if(seq.length >= 3) {
+        sequencePatterns[seq[2]].highTierThird++;
+        sequencePatterns[seq[2]].totalHighTier++;
+      }
+    });
+  }
+}
+
+function getSequenceWeight(multiplier, currentGlobalDry, currentHighTierDry) {
+  let seq = sequencePatterns[multiplier];
+  if(!seq) return 1.0;
+  
+  let weight = 1.0;
+  
+  // Global dry sequence weight
+  if(currentGlobalDry > 100 && seq.totalGlobal > 0) {
+    let firstPct = seq.globalFirst / seq.totalGlobal;
+    let secondPct = seq.globalSecond / seq.totalGlobal;
+    let thirdPct = seq.globalThird / seq.totalGlobal;
+    
+    let globalBonus = 0;
+    if (firstPct > 0.3) globalBonus = 0.5;
+    else if (firstPct > 0.15) globalBonus = 0.3;
+    else if (secondPct > 0.3) globalBonus = 0.2;
+    else if (thirdPct > 0.3) globalBonus = 0.1;
+    
+    weight = weight * (1 + globalBonus);
+  }
+  
+  // High-tier dry sequence weight
+  if(currentHighTierDry > 200 && seq.totalHighTier > 0 && multiplier >= HIGH_TIER_THRESHOLD) {
+    let firstPct = seq.highTierFirst / seq.totalHighTier;
+    let secondPct = seq.highTierSecond / seq.totalHighTier;
+    let thirdPct = seq.highTierThird / seq.totalHighTier;
+    
+    let highTierBonus = 0;
+    if (firstPct > 0.3) highTierBonus = 0.5;
+    else if (firstPct > 0.15) highTierBonus = 0.3;
+    else if (secondPct > 0.3) highTierBonus = 0.2;
+    else if (thirdPct > 0.3) highTierBonus = 0.1;
+    
+    weight = weight * (1 + highTierBonus);
+  }
+  
+  return Math.min(2.0, Math.max(0.8, weight));
 }
 
 function updateHitIntervals(){
@@ -490,7 +751,6 @@ function updateHitIntervals(){
       let lastHit = rounds[rounds.length - 1];
       hitIntervals[m].currentDryStreak = current - lastHit;
       
-      // Detect burst patterns
       let burstPatterns = [];
       let burstStart = 0;
       for (let i = 0; i < gaps.length; i++) {
@@ -506,7 +766,6 @@ function updateHitIntervals(){
       }
       hitIntervals[m].burstPatterns = burstPatterns;
       
-      // Detect catch-up windows
       let longDroughts = [];
       for (let i = 0; i < gaps.length; i++) {
         if (gaps[i] > hitIntervals[m].avgGap * 2) {
@@ -697,6 +956,8 @@ function deleteLast(){
   if(entries.length === 0) return alert("No entries to delete");
   entries.pop();
   updateHitIntervals();
+  analyzeDrySpells();
+  analyzeSequences();
   save();
   render();
 }
@@ -707,6 +968,8 @@ function clearAll(){
     entries = [];
     predictionHistory = [];
     hitIntervals = {};
+    sequencePatterns = {};
+    drySpellData = {};
     save();
     render();
   }
@@ -836,7 +1099,6 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
   
   let finalProb = baseProb * modifier * actualRateImpact;
   
-  // Remaining hits tracking (silent)
   let totalPossible = TOTAL_ROUNDS / multiplier;
   let remainingHits = totalPossible - actualHits;
   let roundsRemaining = TOTAL_ROUNDS - current;
@@ -849,7 +1111,6 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
     }
   }
   
-  // Use interval patterns if available
   let interval = hitIntervals[multiplier];
   if (interval && interval.hitRounds.length >= 2) {
     let avgGap = interval.avgGap;
@@ -903,13 +1164,36 @@ function calculateFinalProbability(totalRounds, actualHits, lastHit, current, mu
   let catchupBonus = catchupResult.bonus / 100;
   let inCatchup = catchupResult.inCatchup;
   
-  let finalProb = baseProb * accuracyModifier * (1 - penalty);
+  // Calculate dry spell durations for sequence weight
+  let interval = hitIntervals[multiplier];
+  let globalDry = 0;
+  let highTierDry = 0;
+  
+  // Get last global hit
+  let lastGlobalHit = 0;
+  let lastHighTierHit = 0;
+  let entryIndex = 0;
+  for(let i = 0; i < entries.length; i++) {
+    let entry = entries[i];
+    if(entry.multi !== null) {
+      lastGlobalHit = entry.round;
+      if(entry.multi >= HIGH_TIER_THRESHOLD) {
+        lastHighTierHit = entry.round;
+      }
+    }
+  }
+  
+  globalDry = lastGlobalHit ? current - lastGlobalHit : current;
+  highTierDry = lastHighTierHit ? current - lastHighTierHit : current;
+  
+  let sequenceWeight = getSequenceWeight(multiplier, globalDry, highTierDry);
+  
+  let finalProb = baseProb * accuracyModifier * (1 - penalty) * sequenceWeight;
   
   if (inCatchup) {
     finalProb = finalProb * (1 + catchupBonus);
   }
   
-  let interval = hitIntervals[multiplier];
   if (interval && interval.burstPatterns && interval.burstPatterns.length > 0) {
     let hitRounds = interval.hitRounds;
     if (hitRounds.length >= 3) {
@@ -927,6 +1211,32 @@ function calculateFinalProbability(totalRounds, actualHits, lastHit, current, mu
   finalProb = Math.min(99, Math.round(finalProb));
   if (totalRounds > 0 && finalProb < 1) finalProb = 1;
   
+  // Determine sequence position for display
+  let seqPos = '';
+  let seqType = '';
+  if (sequenceWeight > 1.4) {
+    seqPos = '🔮 1st in line';
+    seqType = 'Global Dry';
+  } else if (sequenceWeight > 1.2) {
+    seqPos = '🔮 2nd in line';
+    seqType = 'Global Dry';
+  } else if (sequenceWeight > 1.05) {
+    seqPos = '🔮 3rd in line';
+    seqType = 'Global Dry';
+  }
+  
+  // Check high-tier specific sequence
+  if (multiplier >= HIGH_TIER_THRESHOLD) {
+    let highSeq = sequencePatterns[multiplier];
+    if (highSeq && highSeq.totalHighTier > 0) {
+      let firstPct = highSeq.highTierFirst / highSeq.totalHighTier;
+      if (firstPct > 0.3 && highTierDry > 500) {
+        seqPos = '🔮 High-Tier 1st';
+        seqType = '500x+ Dry';
+      }
+    }
+  }
+  
   return {
     probability: finalProb,
     baseProb: baseProb,
@@ -937,7 +1247,12 @@ function calculateFinalProbability(totalRounds, actualHits, lastHit, current, mu
     accCount: accResult.count,
     accAccuracy: accResult.accuracy || 0,
     inCatchup: inCatchup,
-    catchupBonus: Math.round(catchupBonus * 100)
+    catchupBonus: Math.round(catchupBonus * 100),
+    sequenceWeight: sequenceWeight,
+    sequencePosition: seqPos,
+    sequenceType: seqType,
+    globalDry: globalDry,
+    highTierDry: highTierDry
   };
 }
 
@@ -969,6 +1284,8 @@ function render(){
   }
   
   updateHitIntervals();
+  analyzeDrySpells();
+  analyzeSequences();
   
   let {data, current} = buildStats();
 
@@ -1031,7 +1348,6 @@ function render(){
       catchupText = `📈 Catch-up +${probResult.catchupBonus}%`;
     }
     
-    // Show dry streak info
     let interval = hitIntervals[m];
     let dryText = '';
     if (interval && interval.currentDryStreak !== undefined && interval.currentDryStreak > 0) {
@@ -1040,6 +1356,9 @@ function render(){
         dryText += ` | Max: ${interval.maxDryStreak}`;
       }
     }
+    
+    let seqText = probResult.sequencePosition;
+    let seqTypeText = probResult.sequenceType ? ` (${probResult.sequenceType})` : '';
     
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})" data-multiplier="${m}">
@@ -1051,6 +1370,7 @@ function render(){
         <span class="button-sub">${likelihood} in next 200 rounds</span>
         <span class="button-sub">${dryText}</span>
         <span class="accuracy-badge">${accText} ${streakText} ${catchupText}</span>
+        <span class="dry-type-badge">${seqText}${seqTypeText}</span>
       </button>
     `;
   });
@@ -1060,6 +1380,9 @@ function render(){
   let html = "";
 
   if(entries.length > 0) {
+    let globalStats = drySpellData.global || {};
+    let highTierStats = drySpellData.highTier || {};
+    
     html += `
       <div class="info-box">
         📊 Total Rounds: <b>${current.toLocaleString()}</b> | 
@@ -1070,6 +1393,8 @@ function render(){
           `<span class="range-badge">🧠 ${predictionHistory.filter(p => p.checked).length} predictions learned</span>` : ''}
         <span class="range-badge">🎯 ${Math.round((current/TOTAL_ROUNDS)*100)}% of 500k rounds</span>
         <span class="range-badge">📊 ${Object.keys(hitIntervals).filter(m => hitIntervals[m].hitRounds.length >= 2).length} multipliers with interval data</span>
+        <span class="range-badge">🌍 Global Dry: ${globalStats.total || 0} (${globalStats.threshold || 600}+ rounds)</span>
+        <span class="range-badge">📈 High-Tier Dry: ${highTierStats.total || 0} (${highTierStats.threshold || 1900}+ rounds)</span>
       </div>
     `;
   }
@@ -1155,6 +1480,21 @@ function render(){
     if (interval && interval.hitRounds.length >= 2) {
       intervalDisplay = `Avg: ${interval.avgGap} | Max Dry: ${interval.maxDryStreak || 0}`;
     }
+    
+    let seq = sequencePatterns[m];
+    let seqDisplay = '';
+    if (seq && (seq.totalGlobal > 0 || seq.totalHighTier > 0)) {
+      let parts = [];
+      if (seq.totalGlobal > 0) {
+        let firstPct = Math.round((seq.globalFirst / seq.totalGlobal) * 100);
+        parts.push(`Global 1st: ${firstPct}%`);
+      }
+      if (seq.totalHighTier > 0 && m >= HIGH_TIER_THRESHOLD) {
+        let firstPct = Math.round((seq.highTierFirst / seq.totalHighTier) * 100);
+        parts.push(`High-Tier 1st: ${firstPct}%`);
+      }
+      seqDisplay = parts.join(' | ');
+    }
 
     html += `
       <div class="card">
@@ -1191,6 +1531,10 @@ function render(){
         
         <div class="stats-row small">
           <span>Interval: <b>${intervalDisplay || 'No data'}</b></span>
+        </div>
+        
+        <div class="stats-row small">
+          <span>Sequence: <b>${seqDisplay || 'No data'}</b></span>
         </div>
         
         <div class="stats-row">
@@ -1233,6 +1577,8 @@ document.getElementById("roundInput").addEventListener("keypress", function(e) {
 
 load();
 updateHitIntervals();
+analyzeDrySpells();
+analyzeSequences();
 createButtons();
 render();
 </script>
