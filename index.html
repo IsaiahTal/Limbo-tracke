@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Limbo Analytics Pro</title>
+<title>Analytics Pro</title>
 
 <style>
 body {
@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 130px;
+  min-height: 140px;
   position: relative;
   overflow: hidden;
   transform-origin: center;
@@ -398,13 +398,11 @@ function addEntry(hitMulti){
     return alert("Round " + r + " already exists! Delete it first or use a different round.");
   }
 
-  // Record predictions before adding the new entry
   recordPredictions(r);
   
   entries.push({round:r, multi:hitMulti});
   entries.sort((a,b) => a.round - b.round);
   
-  // Update hit intervals with new data
   updateHitIntervals();
   
   save();
@@ -437,7 +435,6 @@ function recordPredictions(round){
 }
 
 function updateHitIntervals(){
-  // Rebuild hit intervals from all entries
   hitIntervals = {};
   multipliers.forEach(m => {
     hitIntervals[m] = {
@@ -447,7 +444,9 @@ function updateHitIntervals(){
       minGap: Infinity,
       maxGap: 0,
       burstPatterns: [],
-      catchupWindows: []
+      catchupWindows: [],
+      maxDryStreak: 0,
+      currentDryStreak: 0
     };
   });
   
@@ -455,8 +454,6 @@ function updateHitIntervals(){
   
   let current = entries[entries.length - 1].round;
   let entryIndex = 0;
-  let hitCounts = {};
-  multipliers.forEach(m => { hitCounts[m] = 0; });
   
   for(let round = 1; round <= current; round++) {
     let hitMulti = null;
@@ -472,21 +469,26 @@ function updateHitIntervals(){
     });
   }
   
-  // Calculate gaps for each multiplier
   multipliers.forEach(m => {
     let rounds = hitIntervals[m].hitRounds;
     if (rounds.length >= 2) {
       let gaps = [];
+      let maxDry = 0;
       for (let i = 1; i < rounds.length; i++) {
         let gap = rounds[i] - rounds[i-1];
         gaps.push(gap);
+        if (gap > maxDry) maxDry = gap;
       }
       hitIntervals[m].gaps = gaps;
       hitIntervals[m].avgGap = Math.round(gaps.reduce((a,b) => a + b, 0) / gaps.length);
       hitIntervals[m].minGap = Math.min(...gaps);
       hitIntervals[m].maxGap = Math.max(...gaps);
+      hitIntervals[m].maxDryStreak = maxDry;
       
-      // Detect burst patterns (gaps less than 20% of avg)
+      let lastHit = rounds[rounds.length - 1];
+      hitIntervals[m].currentDryStreak = current - lastHit;
+      
+      // Detect burst patterns
       let burstPatterns = [];
       let burstStart = 0;
       for (let i = 0; i < gaps.length; i++) {
@@ -502,7 +504,7 @@ function updateHitIntervals(){
       }
       hitIntervals[m].burstPatterns = burstPatterns;
       
-      // Detect catch-up windows (gaps > 2x avg after a long drought)
+      // Detect catch-up windows
       let longDroughts = [];
       for (let i = 0; i < gaps.length; i++) {
         if (gaps[i] > hitIntervals[m].avgGap * 2) {
@@ -510,6 +512,10 @@ function updateHitIntervals(){
         }
       }
       hitIntervals[m].catchupWindows = longDroughts;
+    } else if (rounds.length === 1) {
+      let lastHit = rounds[0];
+      hitIntervals[m].currentDryStreak = current - lastHit;
+      hitIntervals[m].maxDryStreak = hitIntervals[m].currentDryStreak;
     }
   });
 }
@@ -632,25 +638,23 @@ function getCatchupBonus(multiplier, lastHit, current) {
   
   let expectedRate = multiplier;
   let roundsSinceLastHit = lastHit ? current - lastHit : current;
+  let maxDry = interval.maxDryStreak || 0;
   
-  // Check if in a catch-up window (drought > 2x expected)
+  // If current dry streak is approaching max dry streak
+  if (maxDry > 0 && roundsSinceLastHit > maxDry * 0.7) {
+    let bonus = Math.min(50, ((roundsSinceLastHit / maxDry) * 30) + 10);
+    return { bonus: Math.round(bonus), inCatchup: true };
+  }
+  
+  // Check if exceeding max dry streak
+  if (maxDry > 0 && roundsSinceLastHit > maxDry) {
+    let bonus = Math.min(60, 40 + ((roundsSinceLastHit - maxDry) / maxDry) * 20);
+    return { bonus: Math.round(bonus), inCatchup: true };
+  }
+  
+  // Check if in catch-up window (drought > 2x expected)
   if (roundsSinceLastHit > expectedRate * 2) {
-    // Check if there's a history of catch-up patterns
-    let catchupHistory = interval.catchupWindows || [];
-    let hasCatchupHistory = catchupHistory.length > 0;
-    
-    // Calculate bonus based on drought length
     let bonus = Math.min(40, (roundsSinceLastHit / expectedRate) * 5);
-    
-    // If historical catch-up patterns exist, add extra bonus
-    if (hasCatchupHistory) {
-      let avgCatchup = catchupHistory.reduce((sum, c) => sum + c.gap, 0) / catchupHistory.length;
-      let catchupRatio = roundsSinceLastHit / avgCatchup;
-      if (catchupRatio > 0.5) {
-        bonus = Math.min(50, bonus + 10);
-      }
-    }
-    
     return { bonus: Math.round(bonus), inCatchup: true };
   }
   
@@ -658,13 +662,11 @@ function getCatchupBonus(multiplier, lastHit, current) {
   if (lastHit) {
     let sinceLastHit = current - lastHit;
     if (sinceLastHit < 50) {
-      // Check if this was a catch-up hit (long drought before)
       let hitRounds = interval.hitRounds;
       let hitIndex = hitRounds.indexOf(lastHit);
       if (hitIndex > 0) {
         let previousGap = hitRounds[hitIndex] - hitRounds[hitIndex - 1];
         if (previousGap > expectedRate * 2) {
-          // This was a catch-up hit, bonus for subsequent hits
           return { bonus: 20, inCatchup: true };
         }
       }
@@ -852,18 +854,25 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
   let interval = hitIntervals[multiplier];
   if (interval && interval.hitRounds.length >= 2) {
     let avgGap = interval.avgGap;
+    let maxDry = interval.maxDryStreak || 0;
+    let currentDry = interval.currentDryStreak || 0;
+    
     if (avgGap > 0 && roundsSinceLastHit > 0) {
       let intervalRatio = roundsSinceLastHit / avgGap;
       if (intervalRatio > 0) {
-        // Blend interval-based probability with base probability
         let intervalProb = Math.min(1, intervalRatio);
         finalProb = (finalProb + intervalProb) / 2;
       }
     }
     
+    // If approaching max dry streak, boost probability
+    if (maxDry > 0 && currentDry > maxDry * 0.7) {
+      let dryBoost = 1 + ((currentDry / maxDry) * 0.3);
+      finalProb = finalProb * dryBoost;
+    }
+    
     // Check for burst patterns
     if (interval.burstPatterns && interval.burstPatterns.length > 0) {
-      // If we're in a burst pattern, increase probability
       let recentHits = interval.hitRounds.slice(-5);
       if (recentHits.length >= 2) {
         let recentGaps = [];
@@ -872,7 +881,7 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
         }
         let avgRecentGap = recentGaps.reduce((a,b) => a + b, 0) / recentGaps.length;
         if (avgRecentGap < interval.avgGap * 0.3) {
-          finalProb = finalProb * 1.3; // Burst mode: 30% boost
+          finalProb = finalProb * 1.3;
         }
       }
     }
@@ -903,10 +912,8 @@ function calculateFinalProbability(totalRounds, actualHits, lastHit, current, mu
     finalProb = finalProb * (1 + catchupBonus);
   }
   
-  // Apply burst pattern boost if active
   let interval = hitIntervals[multiplier];
   if (interval && interval.burstPatterns && interval.burstPatterns.length > 0) {
-    // Check if recent hits show burst pattern
     let hitRounds = interval.hitRounds;
     if (hitRounds.length >= 3) {
       let lastThree = hitRounds.slice(-3);
@@ -915,7 +922,7 @@ function calculateFinalProbability(totalRounds, actualHits, lastHit, current, mu
         gaps.push(lastThree[i] - lastThree[i-1]);
       }
       if (gaps.length === 2 && gaps[0] < interval.avgGap * 0.2 && gaps[1] < interval.avgGap * 0.2) {
-        finalProb = finalProb * 1.2; // Burst pattern detected
+        finalProb = finalProb * 1.2;
       }
     }
   }
@@ -964,7 +971,6 @@ function render(){
     updatePredictions(current);
   }
   
-  // Update hit intervals from current data
   updateHitIntervals();
   
   let {data, current} = buildStats();
@@ -989,8 +995,6 @@ function render(){
     
     let totalPossible = Math.round(TOTAL_ROUNDS / m);
     let remainingHits = totalPossible - actualHits;
-    let roundsRemaining = TOTAL_ROUNDS - current;
-    let expectedRemaining = Math.round(roundsRemaining / m);
     
     let barResult = getBarsAndColor(probability);
     let bars = barResult.bars;
@@ -1036,11 +1040,14 @@ function render(){
     let remainingText = `📌 ${remainingHits}/${totalPossible}`;
     if (remainingHits < 0) remainingText = `📌 All ${totalPossible} used`;
     
-    // Show interval info
+    // Show dry streak info
     let interval = hitIntervals[m];
-    let intervalText = '';
-    if (interval && interval.hitRounds.length >= 2) {
-      intervalText = `⏱️ ${interval.avgGap} avg gap`;
+    let dryText = '';
+    if (interval && interval.currentDryStreak !== undefined && interval.currentDryStreak > 0) {
+      dryText = `🔥 Dry: ${interval.currentDryStreak}`;
+      if (interval.maxDryStreak > 0) {
+        dryText += ` | Max: ${interval.maxDryStreak}`;
+      }
     }
     
     buttonHtml += `
@@ -1052,7 +1059,7 @@ function render(){
         <span class="bar-percentage ${pctClass}">${probability}%</span>
         <span class="button-sub">${likelihood} in next 200 rounds</span>
         <span class="button-sub">${remainingText}</span>
-        <span class="button-sub">${intervalText}</span>
+        <span class="button-sub">${dryText}</span>
         <span class="accuracy-badge">${accText} ${streakText} ${catchupText}</span>
       </button>
     `;
@@ -1156,7 +1163,7 @@ function render(){
     let interval = hitIntervals[m];
     let intervalDisplay = '';
     if (interval && interval.hitRounds.length >= 2) {
-      intervalDisplay = `Avg gap: ${interval.avgGap} | Bursts: ${interval.burstPatterns ? interval.burstPatterns.length : 0}`;
+      intervalDisplay = `Avg: ${interval.avgGap} | Max Dry: ${interval.maxDryStreak || 0}`;
     }
 
     html += `
@@ -1193,7 +1200,7 @@ function render(){
         </div>
         
         <div class="stats-row small">
-          <span>Interval data: <b>${intervalDisplay || 'No data'}</b></span>
+          <span>Interval: <b>${intervalDisplay || 'No data'}</b></span>
         </div>
         
         <div class="stats-row">
