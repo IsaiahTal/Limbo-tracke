@@ -191,16 +191,21 @@ button:hover {
 
 .button-status {
   font-size: 10px;
-  opacity: 0.8;
+  opacity: 0.9;
   margin-top: 2px;
+  font-weight: bold;
 }
 
-.due-true {
+.due-not {
+  color: #ef4444;
+}
+
+.due-yes {
   color: #22c55e;
 }
 
-.due-false {
-  color: #ef4444;
+.due-very {
+  color: #facc15;
 }
 </style>
 </head>
@@ -396,37 +401,36 @@ function getButtonClass(heatType) {
   }
 }
 
-function isMultiplierDue(totalRounds, actualHits, lastHit, current, multiplier) {
-  if (totalRounds === 0 || actualHits === 0) {
-    // If never hit, check if expected hits is >= 1
-    let expectedHits = totalRounds / multiplier;
-    if (expectedHits >= 1) {
-      return true;
-    }
-    return false;
-  }
-  
-  // Calculate rounds since last hit
+function getDueStatus(totalRounds, actualHits, lastHit, current, multiplier) {
+  // Calculate actual rate
+  let actualRate = actualHits > 0 ? totalRounds / actualHits : Infinity;
+  let expectedRate = multiplier;
   let roundsSinceLastHit = lastHit ? current - lastHit : current;
-  
-  // Expected rounds between hits
-  let expectedRounds = multiplier;
-  
-  // If rounds since last hit is >= expected rounds, it's due
-  if (roundsSinceLastHit >= expectedRounds) {
-    return true;
-  }
-  
-  // Also check if overall variance is significantly negative (behind expected hits)
   let expectedHits = totalRounds / multiplier;
-  let variance = actualHits - expectedHits;
   
-  // If behind by more than 0.5 hits, it's due
-  if (variance < -0.5) {
-    return true;
+  // Case 1: Never hit and expected hits >= 1
+  if (actualHits === 0 && expectedHits >= 1) {
+    return { status: 'due', label: 'Due ✅', class: 'due-yes' };
   }
   
-  return false;
+  // Case 2: Very Due - rounds since last hit >= expectedRate * 4
+  if (roundsSinceLastHit >= expectedRate * 4) {
+    return { status: 'very_due', label: 'Very Due 🚨', class: 'due-very' };
+  }
+  
+  // Case 3: Due - rounds since last hit >= actualRate * 0.7 (using actual hit rate)
+  if (actualHits > 0 && roundsSinceLastHit >= actualRate * 0.7) {
+    return { status: 'due', label: 'Due ✅', class: 'due-yes' };
+  }
+  
+  // Case 4: Due - behind expected hits by more than 0.5
+  let variance = actualHits - expectedHits;
+  if (variance < -0.5) {
+    return { status: 'due', label: 'Due ✅', class: 'due-yes' };
+  }
+  
+  // Not Due
+  return { status: 'not_due', label: 'Not Due', class: 'due-not' };
 }
 
 function render(){
@@ -448,15 +452,13 @@ function render(){
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
-    // Check if due
-    let due = isMultiplierDue(total, actualHits, lastHit, current, m);
-    let dueText = due ? "Due ✅" : "Not Due";
-    let dueClass = due ? "due-true" : "due-false";
+    // Get due status
+    let due = getDueStatus(total, actualHits, lastHit, current, m);
     
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})">
         <span class="button-label">${label}</span>
-        <span class="button-status ${dueClass}">${dueText}</span>
+        <span class="button-status ${due.class}">${due.label}</span>
       </button>
     `;
   });
