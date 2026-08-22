@@ -38,10 +38,9 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 75px;
+  min-height: 85px;
   position: relative;
   overflow: hidden;
-  /* Spring animation properties */
   transform-origin: center;
 }
 
@@ -50,7 +49,6 @@ button:hover {
   transform: scale(1.02);
 }
 
-/* ELASTIC REBOUND / POP ANIMATION */
 button:active {
   transform: scale(0.85) !important;
   opacity: 0.6 !important;
@@ -70,7 +68,6 @@ button:active {
   100% { transform: scale(1); }
 }
 
-/* RIPPLE EFFECT */
 .button-hit::after {
   content: '';
   position: absolute;
@@ -233,6 +230,12 @@ button:active {
   font-weight: bold;
 }
 
+.button-sub {
+  font-size: 9px;
+  opacity: 0.6;
+  margin-top: 1px;
+}
+
 /* BAR STYLES */
 .bar-container {
   display: flex;
@@ -259,18 +262,18 @@ button:active {
 }
 
 /* RED BARS - Low probability (1-50%) */
-.bar-red-1 { background: #3a0a0a; }  /* 1-10% - Very dark red */
-.bar-red-2 { background: #5a0a0a; }  /* 11-20% - Dark red */
-.bar-red-3 { background: #7a1a1a; }  /* 21-35% - Medium red */
-.bar-red-4 { background: #9a2a2a; }  /* 36-45% - Red */
-.bar-red-5 { background: #cc3a3a; }  /* 46-50% - Bright red */
+.bar-red-1 { background: #3a0a0a; }
+.bar-red-2 { background: #5a0a0a; }
+.bar-red-3 { background: #7a1a1a; }
+.bar-red-4 { background: #9a2a2a; }
+.bar-red-5 { background: #cc3a3a; }
 
 /* GREEN/YELLOW BARS - High probability (51-99%) */
-.bar-green-1 { background: #1a4a1a; }  /* 51-60% - Light green */
-.bar-green-2 { background: #1a6a1a; }  /* 61-70% - Green */
-.bar-green-3 { background: #2a8a2a; }  /* 71-80% - Bright green */
-.bar-green-4 { background: #6a8a1a; }  /* 81-90% - Yellow-green */
-.bar-green-5 { background: #ccaa1a; }  /* 91-99% - Bright yellow/gold */
+.bar-green-1 { background: #1a4a1a; }
+.bar-green-2 { background: #1a6a1a; }
+.bar-green-3 { background: #2a8a2a; }
+.bar-green-4 { background: #6a8a1a; }
+.bar-green-5 { background: #ccaa1a; }
 
 /* EMPTY BARS */
 .bar-empty { background: #1f2937; }
@@ -395,7 +398,6 @@ function animateButton(multiplier){
         btn.classList.remove('button-hit');
         void btn.offsetWidth;
         btn.classList.add('button-hit');
-        // Remove the class after animation completes
         setTimeout(() => {
           btn.classList.remove('button-hit');
         }, 700);
@@ -620,6 +622,16 @@ function render(){
       barHtml += `<div class="bar ${filled}"></div>`;
     }
     
+    // Determine likelihood description
+    let likelihood = '';
+    if (probability <= 10) likelihood = 'Very Unlikely';
+    else if (probability <= 25) likelihood = 'Unlikely';
+    else if (probability <= 45) likelihood = 'Possible';
+    else if (probability <= 55) likelihood = '50/50';
+    else if (probability <= 70) likelihood = 'Likely';
+    else if (probability <= 85) likelihood = 'Very Likely';
+    else likelihood = 'Almost Certain';
+    
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})" data-multiplier="${m}">
         <span class="button-label">${label}</span>
@@ -627,6 +639,7 @@ function render(){
           ${barHtml}
         </div>
         <span class="bar-percentage ${pctClass}">${probability}%</span>
+        <span class="button-sub">${likelihood} in next 200 rounds</span>
       </button>
     `;
   });
