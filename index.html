@@ -24,7 +24,7 @@ input {
 }
 
 button {
-  padding: 10px;
+  padding: 8px;
   margin: 4px;
   border-radius: 10px;
   border: 2px solid #1f2937;
@@ -33,7 +33,12 @@ button {
   cursor: pointer;
   transition: all 0.3s ease;
   width: 100%;
-  font-size: 16px;
+  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 55px;
 }
 
 button:hover {
@@ -175,6 +180,27 @@ button:hover {
   padding: 12px 20px;
   background: #3b82f6;
   border-color: #3b82f6;
+  min-height: auto;
+  flex-direction: row;
+}
+
+.button-label {
+  font-size: 16px;
+  font-weight: bold;
+}
+
+.button-status {
+  font-size: 10px;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+.due-true {
+  color: #22c55e;
+}
+
+.due-false {
+  color: #ef4444;
 }
 </style>
 </head>
@@ -191,8 +217,8 @@ button:hover {
 <div class="grid" id="buttons"></div>
 
 <div style="margin-top:10px; display:flex; gap:6px;">
-  <button onclick="deleteLast()" style="flex:1; background:#1f2937;">🗑️ Delete Last</button>
-  <button onclick="clearAll()" style="flex:1; background:#4a0e0e;">🗑️ Clear All</button>
+  <button onclick="deleteLast()" style="flex:1; background:#1f2937; min-height:auto; flex-direction:row;">🗑️ Delete Last</button>
+  <button onclick="clearAll()" style="flex:1; background:#4a0e0e; min-height:auto; flex-direction:row;">🗑️ Clear All</button>
 </div>
 
 <div class="round-counter">
@@ -352,11 +378,11 @@ function getHeatMapType(totalRounds, actualHits, multiplier) {
   let expectedRoundsPerHit = multiplier;
   let ratio = actualRoundsPerHit / expectedRoundsPerHit;
   
-  if (ratio > 5.0) return "under-severe";      // Very Under Expected 🔴
-  if (ratio > 2.0) return "under-mild";        // Under Expected 🟠
-  if (ratio < 0.5) return "above-severe";      // Very Above Expected 🟡
-  if (ratio < 2.0) return "above-mild";        // Above Expected 🟨
-  return "perfect";                            // Within Expected 🟢
+  if (ratio > 5.0) return "under-severe";
+  if (ratio > 2.0) return "under-mild";
+  if (ratio < 0.5) return "above-severe";
+  if (ratio < 2.0) return "above-mild";
+  return "perfect";
 }
 
 function getButtonClass(heatType) {
@@ -370,6 +396,39 @@ function getButtonClass(heatType) {
   }
 }
 
+function isMultiplierDue(totalRounds, actualHits, lastHit, current, multiplier) {
+  if (totalRounds === 0 || actualHits === 0) {
+    // If never hit, check if expected hits is >= 1
+    let expectedHits = totalRounds / multiplier;
+    if (expectedHits >= 1) {
+      return true;
+    }
+    return false;
+  }
+  
+  // Calculate rounds since last hit
+  let roundsSinceLastHit = lastHit ? current - lastHit : current;
+  
+  // Expected rounds between hits
+  let expectedRounds = multiplier;
+  
+  // If rounds since last hit is >= expected rounds, it's due
+  if (roundsSinceLastHit >= expectedRounds) {
+    return true;
+  }
+  
+  // Also check if overall variance is significantly negative (behind expected hits)
+  let expectedHits = totalRounds / multiplier;
+  let variance = actualHits - expectedHits;
+  
+  // If behind by more than 0.5 hits, it's due
+  if (variance < -0.5) {
+    return true;
+  }
+  
+  return false;
+}
+
 function render(){
 
   let {data, current} = buildStats();
@@ -377,20 +436,27 @@ function render(){
   document.getElementById("roundText").innerText = current;
   document.getElementById("entryCount").innerText = entries.length;
 
-  // Update buttons with heat map colors
+  // Update buttons with heat map colors AND due status
   let buttonHtml = "";
   multipliers.forEach(m=>{
     let total = data[m].totalRounds;
     let actualHits = data[m].hits;
+    let lastHit = data[m].lastHit;
     let heatType = getHeatMapType(total, actualHits, m);
     let btnClass = getButtonClass(heatType);
     
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
+    // Check if due
+    let due = isMultiplierDue(total, actualHits, lastHit, current, m);
+    let dueText = due ? "Due ✅" : "Not Due";
+    let dueClass = due ? "due-true" : "due-false";
+    
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})">
-        ${label}
+        <span class="button-label">${label}</span>
+        <span class="button-status ${dueClass}">${dueText}</span>
       </button>
     `;
   });
@@ -425,7 +491,6 @@ function render(){
     let actualRoundsPerHit = actualHits > 0 ? (total / actualHits).toFixed(0) : "∞";
     let ratio = actualHits > 0 ? (total / actualHits) / expected : Infinity;
     
-    // Calculate ahead/behind
     let aheadBehind = actualHits - expectedHits;
     let aheadBehindDisplay = aheadBehind.toFixed(2);
     let aheadBehindClass = aheadBehind >= 0 ? "ahead" : "behind";
