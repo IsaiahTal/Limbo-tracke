@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 140px;
+  min-height: 130px;
   position: relative;
   overflow: hidden;
   transform-origin: center;
@@ -295,7 +295,7 @@ button:active {
 
 <body>
 
-<h2>🎯 Limbo Analytics Pro</h2>
+<h2>🎯 Analytics Pro</h2>
 
 <div class="input-row">
   <input id="roundInput" type="number" placeholder="Enter Round Number">
@@ -354,19 +354,19 @@ const probabilityMap = {
 };
 
 function save(){
-  localStorage.setItem("limbo_v4", JSON.stringify(entries));
-  localStorage.setItem("limbo_predictions_v4", JSON.stringify(predictionHistory));
-  localStorage.setItem("limbo_intervals_v4", JSON.stringify(hitIntervals));
+  localStorage.setItem("analytics_pro_v4", JSON.stringify(entries));
+  localStorage.setItem("analytics_pro_predictions_v4", JSON.stringify(predictionHistory));
+  localStorage.setItem("analytics_pro_intervals_v4", JSON.stringify(hitIntervals));
 }
 
 function load(){
-  let data = localStorage.getItem("limbo_v4");
+  let data = localStorage.getItem("analytics_pro_v4");
   if(data) entries = JSON.parse(data);
   
-  let predData = localStorage.getItem("limbo_predictions_v4");
+  let predData = localStorage.getItem("analytics_pro_predictions_v4");
   if(predData) predictionHistory = JSON.parse(predData);
   
-  let intervalData = localStorage.getItem("limbo_intervals_v4");
+  let intervalData = localStorage.getItem("analytics_pro_intervals_v4");
   if(intervalData) hitIntervals = JSON.parse(intervalData);
 }
 
@@ -640,25 +640,21 @@ function getCatchupBonus(multiplier, lastHit, current) {
   let roundsSinceLastHit = lastHit ? current - lastHit : current;
   let maxDry = interval.maxDryStreak || 0;
   
-  // If current dry streak is approaching max dry streak
   if (maxDry > 0 && roundsSinceLastHit > maxDry * 0.7) {
     let bonus = Math.min(50, ((roundsSinceLastHit / maxDry) * 30) + 10);
     return { bonus: Math.round(bonus), inCatchup: true };
   }
   
-  // Check if exceeding max dry streak
   if (maxDry > 0 && roundsSinceLastHit > maxDry) {
     let bonus = Math.min(60, 40 + ((roundsSinceLastHit - maxDry) / maxDry) * 20);
     return { bonus: Math.round(bonus), inCatchup: true };
   }
   
-  // Check if in catch-up window (drought > 2x expected)
   if (roundsSinceLastHit > expectedRate * 2) {
     let bonus = Math.min(40, (roundsSinceLastHit / expectedRate) * 5);
     return { bonus: Math.round(bonus), inCatchup: true };
   }
   
-  // Check if recently had a catch-up hit (within last 50 rounds)
   if (lastHit) {
     let sinceLastHit = current - lastHit;
     if (sinceLastHit < 50) {
@@ -838,6 +834,7 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
   
   let finalProb = baseProb * modifier * actualRateImpact;
   
+  // Remaining hits tracking (silent)
   let totalPossible = TOTAL_ROUNDS / multiplier;
   let remainingHits = totalPossible - actualHits;
   let roundsRemaining = TOTAL_ROUNDS - current;
@@ -865,13 +862,11 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
       }
     }
     
-    // If approaching max dry streak, boost probability
     if (maxDry > 0 && currentDry > maxDry * 0.7) {
       let dryBoost = 1 + ((currentDry / maxDry) * 0.3);
       finalProb = finalProb * dryBoost;
     }
     
-    // Check for burst patterns
     if (interval.burstPatterns && interval.burstPatterns.length > 0) {
       let recentHits = interval.hitRounds.slice(-5);
       if (recentHits.length >= 2) {
@@ -993,9 +988,6 @@ function render(){
     let probResult = calculateFinalProbability(total, actualHits, lastHit, current, m);
     let probability = probResult.probability;
     
-    let totalPossible = Math.round(TOTAL_ROUNDS / m);
-    let remainingHits = totalPossible - actualHits;
-    
     let barResult = getBarsAndColor(probability);
     let bars = barResult.bars;
     let barClass = barResult.barClass;
@@ -1037,9 +1029,6 @@ function render(){
       catchupText = `📈 Catch-up +${probResult.catchupBonus}%`;
     }
     
-    let remainingText = `📌 ${remainingHits}/${totalPossible}`;
-    if (remainingHits < 0) remainingText = `📌 All ${totalPossible} used`;
-    
     // Show dry streak info
     let interval = hitIntervals[m];
     let dryText = '';
@@ -1058,7 +1047,6 @@ function render(){
         </div>
         <span class="bar-percentage ${pctClass}">${probability}%</span>
         <span class="button-sub">${likelihood} in next 200 rounds</span>
-        <span class="button-sub">${remainingText}</span>
         <span class="button-sub">${dryText}</span>
         <span class="accuracy-badge">${accText} ${streakText} ${catchupText}</span>
       </button>
