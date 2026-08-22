@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 130px;
+  min-height: 125px;
   position: relative;
   overflow: hidden;
   transform-origin: center;
@@ -354,19 +354,21 @@ const probabilityMap = {
 };
 
 function save(){
-  localStorage.setItem("analytics_pro_v4", JSON.stringify(entries));
-  localStorage.setItem("analytics_pro_predictions_v4", JSON.stringify(predictionHistory));
-  localStorage.setItem("analytics_pro_intervals_v4", JSON.stringify(hitIntervals));
+  // Keep the original localStorage keys so existing data is preserved
+  localStorage.setItem("limbo_v4", JSON.stringify(entries));
+  localStorage.setItem("limbo_predictions_v4", JSON.stringify(predictionHistory));
+  localStorage.setItem("limbo_intervals_v4", JSON.stringify(hitIntervals));
 }
 
 function load(){
-  let data = localStorage.getItem("analytics_pro_v4");
+  // Load from the original keys
+  let data = localStorage.getItem("limbo_v4");
   if(data) entries = JSON.parse(data);
   
-  let predData = localStorage.getItem("analytics_pro_predictions_v4");
+  let predData = localStorage.getItem("limbo_predictions_v4");
   if(predData) predictionHistory = JSON.parse(predData);
   
-  let intervalData = localStorage.getItem("analytics_pro_intervals_v4");
+  let intervalData = localStorage.getItem("limbo_intervals_v4");
   if(intervalData) hitIntervals = JSON.parse(intervalData);
 }
 
