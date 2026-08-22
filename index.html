@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 115px;
+  min-height: 130px;
   position: relative;
   overflow: hidden;
   transform-origin: center;
@@ -328,6 +328,7 @@ let multipliers = [
 
 let entries = [];
 let predictionHistory = [];
+let hitIntervals = {};
 
 const probabilityMap = {
   200: 200,
@@ -355,6 +356,7 @@ const probabilityMap = {
 function save(){
   localStorage.setItem("limbo_v4", JSON.stringify(entries));
   localStorage.setItem("limbo_predictions_v4", JSON.stringify(predictionHistory));
+  localStorage.setItem("limbo_intervals_v4", JSON.stringify(hitIntervals));
 }
 
 function load(){
@@ -363,6 +365,9 @@ function load(){
   
   let predData = localStorage.getItem("limbo_predictions_v4");
   if(predData) predictionHistory = JSON.parse(predData);
+  
+  let intervalData = localStorage.getItem("limbo_intervals_v4");
+  if(intervalData) hitIntervals = JSON.parse(intervalData);
 }
 
 function addRoundOnly(){
@@ -398,6 +403,10 @@ function addEntry(hitMulti){
   
   entries.push({round:r, multi:hitMulti});
   entries.sort((a,b) => a.round - b.round);
+  
+  // Update hit intervals with new data
+  updateHitIntervals();
+  
   save();
   render();
   document.getElementById("roundInput").value = "";
@@ -427,6 +436,84 @@ function recordPredictions(round){
   });
 }
 
+function updateHitIntervals(){
+  // Rebuild hit intervals from all entries
+  hitIntervals = {};
+  multipliers.forEach(m => {
+    hitIntervals[m] = {
+      hitRounds: [],
+      gaps: [],
+      avgGap: 0,
+      minGap: Infinity,
+      maxGap: 0,
+      burstPatterns: [],
+      catchupWindows: []
+    };
+  });
+  
+  if (entries.length === 0) return;
+  
+  let current = entries[entries.length - 1].round;
+  let entryIndex = 0;
+  let hitCounts = {};
+  multipliers.forEach(m => { hitCounts[m] = 0; });
+  
+  for(let round = 1; round <= current; round++) {
+    let hitMulti = null;
+    if(entryIndex < entries.length && entries[entryIndex].round === round) {
+      hitMulti = entries[entryIndex].multi;
+      entryIndex++;
+    }
+    
+    multipliers.forEach(m => {
+      if(hitMulti !== null && hitMulti >= m) {
+        hitIntervals[m].hitRounds.push(round);
+      }
+    });
+  }
+  
+  // Calculate gaps for each multiplier
+  multipliers.forEach(m => {
+    let rounds = hitIntervals[m].hitRounds;
+    if (rounds.length >= 2) {
+      let gaps = [];
+      for (let i = 1; i < rounds.length; i++) {
+        let gap = rounds[i] - rounds[i-1];
+        gaps.push(gap);
+      }
+      hitIntervals[m].gaps = gaps;
+      hitIntervals[m].avgGap = Math.round(gaps.reduce((a,b) => a + b, 0) / gaps.length);
+      hitIntervals[m].minGap = Math.min(...gaps);
+      hitIntervals[m].maxGap = Math.max(...gaps);
+      
+      // Detect burst patterns (gaps less than 20% of avg)
+      let burstPatterns = [];
+      let burstStart = 0;
+      for (let i = 0; i < gaps.length; i++) {
+        if (gaps[i] < hitIntervals[m].avgGap * 0.2) {
+          if (burstStart === 0) burstStart = i;
+        } else if (burstStart > 0) {
+          burstPatterns.push({ start: burstStart, end: i - 1, count: i - burstStart });
+          burstStart = 0;
+        }
+      }
+      if (burstStart > 0) {
+        burstPatterns.push({ start: burstStart, end: gaps.length - 1, count: gaps.length - burstStart });
+      }
+      hitIntervals[m].burstPatterns = burstPatterns;
+      
+      // Detect catch-up windows (gaps > 2x avg after a long drought)
+      let longDroughts = [];
+      for (let i = 0; i < gaps.length; i++) {
+        if (gaps[i] > hitIntervals[m].avgGap * 2) {
+          longDroughts.push({ index: i, gap: gaps[i] });
+        }
+      }
+      hitIntervals[m].catchupWindows = longDroughts;
+    }
+  });
+}
+
 function updatePredictions(currentRound){
   predictionHistory.forEach(pred => {
     if (!pred.checked && pred.round <= currentRound) {
@@ -447,8 +534,8 @@ function updatePredictions(currentRound){
     }
   });
   
-  if (predictionHistory.length > 2000) {
-    predictionHistory = predictionHistory.slice(-2000);
+  if (predictionHistory.length > 5000) {
+    predictionHistory = predictionHistory.slice(-5000);
   }
   
   save();
@@ -457,7 +544,7 @@ function updatePredictions(currentRound){
 function getAccuracyModifier(multiplier) {
   let preds = predictionHistory.filter(p => p.multiplier === multiplier && p.checked);
   
-  if (preds.length < 5) return { modifier: 1.0, count: preds.length };
+  if (preds.length === 0) return { modifier: 1.0, count: 0, accuracy: 0 };
   
   let correct = 0;
   preds.forEach(pred => {
@@ -476,18 +563,13 @@ function getAccuracyModifier(multiplier) {
 function getCumulativePenalty(multiplier, currentPrediction) {
   let preds = predictionHistory.filter(p => p.multiplier === multiplier && p.checked);
   
-  if (preds.length < 3) return { penalty: 0, streak: 0 };
+  if (preds.length < 2) return { penalty: 0, streak: 0, streakType: '' };
   
-  // Check recent predictions (last 10)
-  let recent = preds.slice(-10);
+  let recent = preds.slice(-15);
   
-  let missCount = 0;
-  let hitCount = 0;
   let consecutiveMiss = 0;
   let consecutiveHit = 0;
-  let currentStreak = 0;
   
-  // Check for consecutive misses on high predictions
   for (let i = recent.length - 1; i >= 0; i--) {
     let pred = recent[i];
     if (pred.prediction >= 70 && !pred.actualHit) {
@@ -497,7 +579,6 @@ function getCumulativePenalty(multiplier, currentPrediction) {
     }
   }
   
-  // Check for consecutive hits on low predictions
   for (let i = recent.length - 1; i >= 0; i--) {
     let pred = recent[i];
     if (pred.prediction <= 30 && pred.actualHit) {
@@ -507,50 +588,90 @@ function getCumulativePenalty(multiplier, currentPrediction) {
     }
   }
   
-  // Count total misses for high predictions
-  let highMisses = preds.filter(p => p.prediction >= 70 && !p.actualHit).length;
-  let lowHits = preds.filter(p => p.prediction <= 30 && p.actualHit).length;
-  
   let penalty = 0;
   let streak = 0;
   let streakType = '';
   
-  // If high predictions are missing frequently
   if (consecutiveMiss >= 2 && currentPrediction >= 70) {
     penalty = Math.min(0.5, consecutiveMiss * 0.08);
     streak = consecutiveMiss;
     streakType = 'miss';
   }
   
-  // If low predictions are hitting frequently
   if (consecutiveHit >= 2 && currentPrediction <= 30) {
     penalty = Math.min(0.5, consecutiveHit * 0.08);
     streak = consecutiveHit;
     streakType = 'hit';
   }
   
-  // Add historical penalty for high misses
+  let highMisses = preds.filter(p => p.prediction >= 70 && !p.actualHit).length;
+  let lowHits = preds.filter(p => p.prediction <= 30 && p.actualHit).length;
+  
   if (highMisses > 3 && currentPrediction >= 70) {
     let extraPenalty = Math.min(0.3, highMisses * 0.02);
     penalty = Math.max(penalty, extraPenalty);
   }
   
-  // Add bonus for low hits
   if (lowHits > 3 && currentPrediction <= 30) {
     let extraBonus = Math.min(0.3, lowHits * 0.02);
-    penalty = penalty - extraBonus; // Negative penalty = bonus
+    penalty = penalty - extraBonus;
   }
   
-  // Clamp penalty
   penalty = Math.max(-0.4, Math.min(0.5, penalty));
   
   return { 
     penalty: penalty, 
     streak: streak,
-    streakType: streakType,
-    highMisses: highMisses,
-    lowHits: lowHits
+    streakType: streakType
   };
+}
+
+function getCatchupBonus(multiplier, lastHit, current) {
+  let interval = hitIntervals[multiplier];
+  if (!interval || interval.hitRounds.length < 2) return { bonus: 0, inCatchup: false };
+  
+  let expectedRate = multiplier;
+  let roundsSinceLastHit = lastHit ? current - lastHit : current;
+  
+  // Check if in a catch-up window (drought > 2x expected)
+  if (roundsSinceLastHit > expectedRate * 2) {
+    // Check if there's a history of catch-up patterns
+    let catchupHistory = interval.catchupWindows || [];
+    let hasCatchupHistory = catchupHistory.length > 0;
+    
+    // Calculate bonus based on drought length
+    let bonus = Math.min(40, (roundsSinceLastHit / expectedRate) * 5);
+    
+    // If historical catch-up patterns exist, add extra bonus
+    if (hasCatchupHistory) {
+      let avgCatchup = catchupHistory.reduce((sum, c) => sum + c.gap, 0) / catchupHistory.length;
+      let catchupRatio = roundsSinceLastHit / avgCatchup;
+      if (catchupRatio > 0.5) {
+        bonus = Math.min(50, bonus + 10);
+      }
+    }
+    
+    return { bonus: Math.round(bonus), inCatchup: true };
+  }
+  
+  // Check if recently had a catch-up hit (within last 50 rounds)
+  if (lastHit) {
+    let sinceLastHit = current - lastHit;
+    if (sinceLastHit < 50) {
+      // Check if this was a catch-up hit (long drought before)
+      let hitRounds = interval.hitRounds;
+      let hitIndex = hitRounds.indexOf(lastHit);
+      if (hitIndex > 0) {
+        let previousGap = hitRounds[hitIndex] - hitRounds[hitIndex - 1];
+        if (previousGap > expectedRate * 2) {
+          // This was a catch-up hit, bonus for subsequent hits
+          return { bonus: 20, inCatchup: true };
+        }
+      }
+    }
+  }
+  
+  return { bonus: 0, inCatchup: false };
 }
 
 function animateButton(multiplier){
@@ -575,15 +696,17 @@ function animateButton(multiplier){
 function deleteLast(){
   if(entries.length === 0) return alert("No entries to delete");
   entries.pop();
+  updateHitIntervals();
   save();
   render();
 }
 
 function clearAll(){
   if(entries.length === 0) return;
-  if(confirm("Clear all entries? (This will also clear prediction history)")){
+  if(confirm("Clear all entries? (This will also clear prediction history and intervals)")){
     entries = [];
     predictionHistory = [];
+    hitIntervals = {};
     save();
     render();
   }
@@ -692,18 +815,15 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
   let roundsSinceLastHit = lastHit ? current - lastHit : current;
   let aheadBehind = actualHits - expectedHits;
   
-  // Base probability from rounds since last hit
   let baseProb = roundsSinceLastHit / expectedRate;
   
-  // Ahead/Behind modifier
   let modifier = 1;
   if (aheadBehind > 0) {
-    modifier = 1 / (1 + aheadBehind * 0.25);
+    modifier = 1 / (1 + aheadBehind * 0.15);
   } else if (aheadBehind < 0) {
-    modifier = 1 + (Math.abs(aheadBehind) * 0.4);
+    modifier = 1 + (Math.abs(aheadBehind) * 0.2);
   }
   
-  // Actual rate impact
   let actualRateImpact = 1;
   if (actualHits > 0) {
     let rateRatio = actualRate / expectedRate;
@@ -716,17 +836,45 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
   
   let finalProb = baseProb * modifier * actualRateImpact;
   
-  // Consider remaining hits in 500k rounds
   let totalPossible = TOTAL_ROUNDS / multiplier;
   let remainingHits = totalPossible - actualHits;
   let roundsRemaining = TOTAL_ROUNDS - current;
   let expectedRemaining = roundsRemaining / multiplier;
   
-  // If remaining hits is low, probability increases
   if (remainingHits > 0 && expectedRemaining > 0) {
     let remainingRatio = remainingHits / expectedRemaining;
     if (remainingRatio < 0.8) {
-      finalProb = finalProb * (1 + (1 - remainingRatio) * 0.3);
+      finalProb = finalProb * (1 + (1 - remainingRatio) * 0.2);
+    }
+  }
+  
+  // Use interval patterns if available
+  let interval = hitIntervals[multiplier];
+  if (interval && interval.hitRounds.length >= 2) {
+    let avgGap = interval.avgGap;
+    if (avgGap > 0 && roundsSinceLastHit > 0) {
+      let intervalRatio = roundsSinceLastHit / avgGap;
+      if (intervalRatio > 0) {
+        // Blend interval-based probability with base probability
+        let intervalProb = Math.min(1, intervalRatio);
+        finalProb = (finalProb + intervalProb) / 2;
+      }
+    }
+    
+    // Check for burst patterns
+    if (interval.burstPatterns && interval.burstPatterns.length > 0) {
+      // If we're in a burst pattern, increase probability
+      let recentHits = interval.hitRounds.slice(-5);
+      if (recentHits.length >= 2) {
+        let recentGaps = [];
+        for (let i = 1; i < recentHits.length; i++) {
+          recentGaps.push(recentHits[i] - recentHits[i-1]);
+        }
+        let avgRecentGap = recentGaps.reduce((a,b) => a + b, 0) / recentGaps.length;
+        if (avgRecentGap < interval.avgGap * 0.3) {
+          finalProb = finalProb * 1.3; // Burst mode: 30% boost
+        }
+      }
     }
   }
   
@@ -739,15 +887,38 @@ function calculateBaseProbability(totalRounds, actualHits, lastHit, current, mul
 function calculateFinalProbability(totalRounds, actualHits, lastHit, current, multiplier) {
   let baseProb = calculateBaseProbability(totalRounds, actualHits, lastHit, current, multiplier);
   
-  // Apply accuracy modifier
   let accResult = getAccuracyModifier(multiplier);
   let accuracyModifier = accResult.modifier;
   
-  // Apply cumulative penalty/bonus
   let penaltyResult = getCumulativePenalty(multiplier, baseProb);
   let penalty = penaltyResult.penalty;
   
+  let catchupResult = getCatchupBonus(multiplier, lastHit, current);
+  let catchupBonus = catchupResult.bonus / 100;
+  let inCatchup = catchupResult.inCatchup;
+  
   let finalProb = baseProb * accuracyModifier * (1 - penalty);
+  
+  if (inCatchup) {
+    finalProb = finalProb * (1 + catchupBonus);
+  }
+  
+  // Apply burst pattern boost if active
+  let interval = hitIntervals[multiplier];
+  if (interval && interval.burstPatterns && interval.burstPatterns.length > 0) {
+    // Check if recent hits show burst pattern
+    let hitRounds = interval.hitRounds;
+    if (hitRounds.length >= 3) {
+      let lastThree = hitRounds.slice(-3);
+      let gaps = [];
+      for (let i = 1; i < lastThree.length; i++) {
+        gaps.push(lastThree[i] - lastThree[i-1]);
+      }
+      if (gaps.length === 2 && gaps[0] < interval.avgGap * 0.2 && gaps[1] < interval.avgGap * 0.2) {
+        finalProb = finalProb * 1.2; // Burst pattern detected
+      }
+    }
+  }
   
   finalProb = Math.min(99, Math.round(finalProb));
   if (totalRounds > 0 && finalProb < 1) finalProb = 1;
@@ -760,7 +931,9 @@ function calculateFinalProbability(totalRounds, actualHits, lastHit, current, mu
     streak: penaltyResult.streak,
     streakType: penaltyResult.streakType,
     accCount: accResult.count,
-    accAccuracy: accResult.accuracy || 0
+    accAccuracy: accResult.accuracy || 0,
+    inCatchup: inCatchup,
+    catchupBonus: Math.round(catchupBonus * 100)
   };
 }
 
@@ -791,6 +964,9 @@ function render(){
     updatePredictions(current);
   }
   
+  // Update hit intervals from current data
+  updateHitIntervals();
+  
   let {data, current} = buildStats();
 
   document.getElementById("roundText").innerText = current;
@@ -808,17 +984,14 @@ function render(){
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
-    // Calculate final probability with all learning
     let probResult = calculateFinalProbability(total, actualHits, lastHit, current, m);
     let probability = probResult.probability;
     
-    // Calculate remaining hits
     let totalPossible = Math.round(TOTAL_ROUNDS / m);
     let remainingHits = totalPossible - actualHits;
     let roundsRemaining = TOTAL_ROUNDS - current;
     let expectedRemaining = Math.round(roundsRemaining / m);
     
-    // Get bars and colors
     let barResult = getBarsAndColor(probability);
     let bars = barResult.bars;
     let barClass = barResult.barClass;
@@ -830,7 +1003,6 @@ function render(){
       barHtml += `<div class="bar ${filled}"></div>`;
     }
     
-    // Likelihood description
     let likelihood = '';
     if (probability <= 10) likelihood = 'Very Unlikely';
     else if (probability <= 25) likelihood = 'Unlikely';
@@ -840,27 +1012,36 @@ function render(){
     else if (probability <= 85) likelihood = 'Very Likely';
     else likelihood = 'Almost Certain';
     
-    // Accuracy info
     let accText = '';
-    if (probResult.accCount >= 5) {
-      accText = `📊 ${probResult.accAccuracy}% acc (${probResult.accCount} preds)`;
+    if (probResult.accCount >= 3) {
+      accText = `📊 ${probResult.accAccuracy}% acc (${probResult.accCount})`;
     } else if (probResult.accCount > 0) {
-      accText = `🧠 Learning... (${probResult.accCount}/5)`;
+      accText = `🧠 Learning... (${probResult.accCount})`;
     }
     
-    // Streak info
     let streakText = '';
     if (probResult.streak >= 2) {
       if (probResult.streakType === 'miss') {
-        streakText = `🔥 Miss streak: ${probResult.streak}`;
+        streakText = `🔥 Miss: ${probResult.streak}`;
       } else if (probResult.streakType === 'hit') {
-        streakText = `✅ Hit streak: ${probResult.streak}`;
+        streakText = `✅ Hit: ${probResult.streak}`;
       }
     }
     
-    // Remaining info
-    let remainingText = `📌 ${remainingHits}/${totalPossible} remaining`;
-    if (remainingHits < 0) remainingText = `📌 All ${totalPossible} hits used`;
+    let catchupText = '';
+    if (probResult.inCatchup) {
+      catchupText = `📈 Catch-up +${probResult.catchupBonus}%`;
+    }
+    
+    let remainingText = `📌 ${remainingHits}/${totalPossible}`;
+    if (remainingHits < 0) remainingText = `📌 All ${totalPossible} used`;
+    
+    // Show interval info
+    let interval = hitIntervals[m];
+    let intervalText = '';
+    if (interval && interval.hitRounds.length >= 2) {
+      intervalText = `⏱️ ${interval.avgGap} avg gap`;
+    }
     
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})" data-multiplier="${m}">
@@ -871,7 +1052,8 @@ function render(){
         <span class="bar-percentage ${pctClass}">${probability}%</span>
         <span class="button-sub">${likelihood} in next 200 rounds</span>
         <span class="button-sub">${remainingText}</span>
-        <span class="accuracy-badge">${accText} ${streakText}</span>
+        <span class="button-sub">${intervalText}</span>
+        <span class="accuracy-badge">${accText} ${streakText} ${catchupText}</span>
       </button>
     `;
   });
@@ -890,6 +1072,7 @@ function render(){
         ${predictionHistory.filter(p => p.checked).length > 0 ? 
           `<span class="range-badge">🧠 ${predictionHistory.filter(p => p.checked).length} predictions learned</span>` : ''}
         <span class="range-badge">🎯 ${Math.round((current/TOTAL_ROUNDS)*100)}% of 500k rounds</span>
+        <span class="range-badge">📊 ${Object.keys(hitIntervals).filter(m => hitIntervals[m].hitRounds.length >= 2).length} multipliers with interval data</span>
       </div>
     `;
   }
@@ -969,6 +1152,12 @@ function render(){
     
     let gaps = getHitGaps(hitRounds);
     let gapDisplay = gaps.min !== null ? `${gaps.min}-${gaps.max}` : 'No data';
+    
+    let interval = hitIntervals[m];
+    let intervalDisplay = '';
+    if (interval && interval.hitRounds.length >= 2) {
+      intervalDisplay = `Avg gap: ${interval.avgGap} | Bursts: ${interval.burstPatterns ? interval.burstPatterns.length : 0}`;
+    }
 
     html += `
       <div class="card">
@@ -1001,6 +1190,10 @@ function render(){
         <div class="stats-row small">
           <span>Total possible: <b>${totalPossible}</b></span>
           <span>Remaining: <b>${remainingHits}</b></span>
+        </div>
+        
+        <div class="stats-row small">
+          <span>Interval data: <b>${intervalDisplay || 'No data'}</b></span>
         </div>
         
         <div class="stats-row">
@@ -1042,6 +1235,7 @@ document.getElementById("roundInput").addEventListener("keypress", function(e) {
 });
 
 load();
+updateHitIntervals();
 createButtons();
 render();
 </script>
