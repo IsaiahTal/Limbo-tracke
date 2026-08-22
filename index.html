@@ -484,39 +484,80 @@ function getButtonClass(heatType) {
   }
 }
 
-function getBars(roundsSinceLastHit, minGap, maxGap, multiplier) {
-  if (minGap === null) {
-    let expectedGap = multiplier;
-    let ratio = roundsSinceLastHit / expectedGap;
-    
-    if (ratio >= 1) {
-      let duePercent = Math.min(99, Math.round((ratio) * 100));
-      let bars = Math.min(5, Math.floor(duePercent / 20) + 1);
-      let barClass = 'bar-due-';
-      let pctClass = 'pct-due';
-      return { bars, barClass, pctClass, percentage: duePercent };
+function calculateDuePercentage(totalRounds, actualHits, lastHit, current, multiplier) {
+  // Calculate expected hits
+  let expectedHits = totalRounds / multiplier;
+  
+  // Calculate actual rate
+  let actualRate = actualHits > 0 ? totalRounds / actualHits : Infinity;
+  let expectedRate = multiplier;
+  
+  // Calculate rounds since last hit
+  let roundsSinceLastHit = lastHit ? current - lastHit : current;
+  
+  // Calculate ahead/behind
+  let aheadBehind = actualHits - expectedHits;
+  
+  // Step 1: Base due from rounds since last hit vs expected rate
+  let baseDue = roundsSinceLastHit / expectedRate;
+  
+  // Step 2: Calculate ahead/behind modifier
+  let modifier = 1;
+  if (aheadBehind > 0) {
+    // Ahead - reduces due percentage
+    // The more ahead, the less due
+    modifier = 1 / (1 + aheadBehind * 0.25);
+  } else if (aheadBehind < 0) {
+    // Behind - increases due percentage
+    // The more behind, the more due
+    modifier = 1 + (Math.abs(aheadBehind) * 0.4);
+  }
+  
+  // Step 3: Actual rate impact
+  let actualRateImpact = 1;
+  if (actualHits > 0) {
+    let rateRatio = actualRate / expectedRate;
+    if (rateRatio < 1) {
+      // Hitting more often than expected - less due
+      actualRateImpact = Math.max(0.5, rateRatio);
     } else {
-      let notDuePercent = Math.min(99, Math.round((1 - ratio) * 100));
-      let bars = Math.min(5, Math.floor(notDuePercent / 20) + 1);
-      let barClass = 'bar-notdue-';
-      let pctClass = 'pct-notdue';
-      return { bars, barClass, pctClass, percentage: notDuePercent };
+      // Hitting less often than expected - more due
+      actualRateImpact = Math.min(2.0, rateRatio);
     }
   }
   
-  if (roundsSinceLastHit >= minGap) {
-    let duePercent = Math.min(99, Math.round(((roundsSinceLastHit - minGap) / minGap) * 100 + 10));
-    let bars = Math.min(5, Math.floor(duePercent / 20) + 1);
-    let barClass = 'bar-due-';
-    let pctClass = duePercent >= 70 ? 'pct-verydue' : 'pct-due';
-    return { bars, barClass, pctClass, percentage: duePercent };
+  // Step 4: Calculate final due percentage
+  let finalDue = baseDue * modifier * actualRateImpact;
+  
+  // Cap at 99%
+  finalDue = Math.min(99, Math.round(finalDue * 100));
+  
+  // Ensure minimum 1% if there's any data
+  if (totalRounds > 0 && finalDue < 1) finalDue = 1;
+  
+  return finalDue;
+}
+
+function getBarsAndColor(percentage) {
+  let bars = Math.min(5, Math.floor(percentage / 20) + 1);
+  let barClass = '';
+  let pctClass = '';
+  
+  if (percentage <= 50) {
+    // Not Due - Red spectrum
+    barClass = 'bar-notdue-';
+    pctClass = 'pct-notdue';
+  } else if (percentage <= 70) {
+    // Starting to be Due - Green
+    barClass = 'bar-due-';
+    pctClass = 'pct-due';
   } else {
-    let notDuePercent = Math.min(99, Math.round(((minGap - roundsSinceLastHit) / minGap) * 100));
-    let bars = Math.min(5, Math.floor(notDuePercent / 20) + 1);
-    let barClass = 'bar-notdue-';
-    let pctClass = 'pct-notdue';
-    return { bars, barClass, pctClass, percentage: notDuePercent };
+    // Very Due - Yellow/Gold
+    barClass = 'bar-due-';
+    pctClass = 'pct-verydue';
   }
+  
+  return { bars, barClass, pctClass };
 }
 
 function render(){
@@ -538,16 +579,13 @@ function render(){
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
-    let gaps = getHitGaps(hitRounds);
-    let minGap = gaps.min;
-    let maxGap = gaps.max;
+    // Calculate due percentage using the intelligent system
+    let duePercentage = calculateDuePercentage(total, actualHits, lastHit, current, m);
     
-    let roundsSinceLastHit = lastHit ? current - lastHit : current;
-    
-    let barResult = getBars(roundsSinceLastHit, minGap, maxGap, m);
+    // Get bars and colors based on percentage
+    let barResult = getBarsAndColor(duePercentage);
     let bars = barResult.bars;
     let barClass = barResult.barClass;
-    let percentage = barResult.percentage;
     let pctClass = barResult.pctClass;
     
     let barHtml = '';
@@ -562,7 +600,7 @@ function render(){
         <div class="bar-container">
           ${barHtml}
         </div>
-        <span class="bar-percentage ${pctClass}">${percentage}%</span>
+        <span class="bar-percentage ${pctClass}">${duePercentage}%</span>
       </button>
     `;
   });
