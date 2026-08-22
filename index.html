@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 145px;
+  min-height: 130px;
   position: relative;
   overflow: hidden;
   transform-origin: center;
@@ -327,7 +327,8 @@ button:active {
 
 <script>
 const TOTAL_ROUNDS = 500000;
-const HIGH_TIER_THRESHOLD = 500; // Multipliers >= 500 are considered "High Tier"
+const HIGH_TIER_THRESHOLD = 500;
+const SEED_MAX_DRY_MULTIPLIER = 4.8;
 
 let multipliers = [
 200,300,400,500,600,700,800,900,1000,
@@ -443,7 +444,7 @@ function recordPredictions(round){
     let lastHit = data[m].lastHit;
     let hitRounds = data[m].hitRounds;
     
-    let probability = calculateBaseProbability(total, actualHits, lastHit, current, m);
+    let probability = calculateSeedProbability(total, actualHits, lastHit, current, m);
     
     predictionHistory.push({
       multiplier: m,
@@ -453,6 +454,64 @@ function recordPredictions(round){
       checked: false
     });
   });
+}
+
+// ===== SEED-BASED PREDICTION ENGINE =====
+function calculateSeedProbability(totalRounds, actualHits, lastHit, current, multiplier) {
+  // 1. Expected hit rate from seed math
+  let expectedRate = multiplier;
+  let expectedHits = totalRounds / expectedRate;
+  
+  // 2. Actual hit rate from data
+  let actualRate = actualHits > 0 ? totalRounds / actualHits : Infinity;
+  
+  // 3. Rounds since last hit
+  let roundsSinceLastHit = lastHit ? current - lastHit : current;
+  
+  // 4. Ahead/Behind calculation
+  let aheadBehind = actualHits - expectedHits;
+  
+  // 5. Seed Math: Maximum possible dry gap (statistical certainty)
+  // Now using multiplier × 4.8 as requested
+  let maxDryGap = expectedRate * SEED_MAX_DRY_MULTIPLIER;
+  
+  // 6. Seed-Based Probability
+  let seedProb = roundsSinceLastHit / maxDryGap;
+  
+  // 7. Historical Data Modifier
+  let historyModifier = 1;
+  if (actualHits > 0 && actualRate < expectedRate) {
+    historyModifier = Math.min(1.3, expectedRate / actualRate);
+  } else if (actualHits > 0 && actualRate > expectedRate) {
+    historyModifier = Math.max(0.7, actualRate / expectedRate);
+  }
+  
+  // 8. Ahead/Behind Modifier
+  let aheadBehindModifier = 1;
+  if (aheadBehind > 0) {
+    aheadBehindModifier = 1 / (1 + aheadBehind * 0.05);
+  } else if (aheadBehind < 0) {
+    aheadBehindModifier = 1 + (Math.abs(aheadBehind) * 0.08);
+  }
+  
+  // 9. Dry Spell Modifier
+  let drySpellModifier = 1;
+  let interval = hitIntervals[multiplier];
+  if (interval && interval.maxDryStreak > 0) {
+    let dryRatio = roundsSinceLastHit / interval.maxDryStreak;
+    if (dryRatio > 0.7) {
+      drySpellModifier = 1 + ((dryRatio - 0.7) * 0.5);
+    }
+  }
+  
+  // 10. Combine all factors
+  let finalProb = seedProb * historyModifier * aheadBehindModifier * drySpellModifier;
+  
+  // 11. Convert to percentage and cap
+  finalProb = Math.min(99, Math.round(finalProb * 100));
+  if (totalRounds > 0 && finalProb < 1) finalProb = 1;
+  
+  return finalProb;
 }
 
 function analyzeDrySpells(){
@@ -477,7 +536,6 @@ function analyzeDrySpells(){
   
   let current = entries[entries.length - 1].round;
   
-  // First pass: detect all dry spells
   let globalDrySpells = [];
   let highTierDrySpells = [];
   
@@ -489,7 +547,6 @@ function analyzeDrySpells(){
   let globalStart = 0;
   let highTierStart = 0;
   
-  // Track which multipliers hit in sequence after dry spells
   let globalSequence = [];
   let highTierSequence = [];
   
@@ -500,11 +557,10 @@ function analyzeDrySpells(){
       entryIndex++;
     }
     
-    // Global dry detection (ANY hit resets)
     if(hitMulti !== null) {
       if(inGlobalDry) {
         let dryLength = round - globalStart;
-        if(dryLength > 100) { // Minimum threshold to record
+        if(dryLength > 100) {
           globalDrySpells.push({
             start: globalStart,
             end: round,
@@ -517,7 +573,6 @@ function analyzeDrySpells(){
         globalSequence = [];
       }
       lastGlobalHit = round;
-      // Record sequence
       multipliers.forEach(m => {
         if(hitMulti >= m && !globalSequence.includes(m)) {
           globalSequence.push(m);
@@ -531,7 +586,6 @@ function analyzeDrySpells(){
       }
     }
     
-    // High-tier dry detection (only 500x+ hits reset)
     if(hitMulti !== null && hitMulti >= HIGH_TIER_THRESHOLD) {
       if(inHighTierDry) {
         let dryLength = round - highTierStart;
@@ -548,7 +602,6 @@ function analyzeDrySpells(){
         highTierSequence = [];
       }
       lastHighTierHit = round;
-      // Record sequence (only high-tier multipliers)
       multipliers.forEach(m => {
         if(hitMulti >= m && m >= HIGH_TIER_THRESHOLD && !highTierSequence.includes(m)) {
           highTierSequence.push(m);
@@ -563,7 +616,6 @@ function analyzeDrySpells(){
     }
   }
   
-  // Calculate dynamic thresholds from data
   let globalAvg = 0;
   if(globalDrySpells.length > 0) {
     globalAvg = globalDrySpells.reduce((a,b) => a + b.length, 0) / globalDrySpells.length;
@@ -574,15 +626,12 @@ function analyzeDrySpells(){
     highTierAvg = highTierDrySpells.reduce((a,b) => a + b.length, 0) / highTierDrySpells.length;
   }
   
-  // Set thresholds: max(600, avg * 0.3) for global, max(1900, avg * 0.3) for high-tier
   let globalThreshold = Math.max(600, globalAvg * 0.3);
   let highTierThreshold = Math.max(1900, highTierAvg * 0.3);
   
-  // Filter dry spells by thresholds
   let filteredGlobal = globalDrySpells.filter(s => s.length >= globalThreshold);
   let filteredHighTier = highTierDrySpells.filter(s => s.length >= highTierThreshold);
   
-  // Store results
   drySpellData.global.threshold = Math.round(globalThreshold);
   drySpellData.global.drySpells = filteredGlobal;
   drySpellData.global.total = filteredGlobal.length;
@@ -619,7 +668,6 @@ function analyzeSequences(){
     };
   });
   
-  // Analyze global dry spells
   if (drySpellData.global && drySpellData.global.drySpells) {
     drySpellData.global.drySpells.forEach(spell => {
       let seq = spell.sequence || [];
@@ -638,7 +686,6 @@ function analyzeSequences(){
     });
   }
   
-  // Analyze high-tier dry spells
   if (drySpellData.highTier && drySpellData.highTier.drySpells) {
     drySpellData.highTier.drySpells.forEach(spell => {
       let seq = spell.sequence || [];
@@ -656,45 +703,6 @@ function analyzeSequences(){
       }
     });
   }
-}
-
-function getSequenceWeight(multiplier, currentGlobalDry, currentHighTierDry) {
-  let seq = sequencePatterns[multiplier];
-  if(!seq) return 1.0;
-  
-  let weight = 1.0;
-  
-  // Global dry sequence weight
-  if(currentGlobalDry > 100 && seq.totalGlobal > 0) {
-    let firstPct = seq.globalFirst / seq.totalGlobal;
-    let secondPct = seq.globalSecond / seq.totalGlobal;
-    let thirdPct = seq.globalThird / seq.totalGlobal;
-    
-    let globalBonus = 0;
-    if (firstPct > 0.3) globalBonus = 0.5;
-    else if (firstPct > 0.15) globalBonus = 0.3;
-    else if (secondPct > 0.3) globalBonus = 0.2;
-    else if (thirdPct > 0.3) globalBonus = 0.1;
-    
-    weight = weight * (1 + globalBonus);
-  }
-  
-  // High-tier dry sequence weight
-  if(currentHighTierDry > 200 && seq.totalHighTier > 0 && multiplier >= HIGH_TIER_THRESHOLD) {
-    let firstPct = seq.highTierFirst / seq.totalHighTier;
-    let secondPct = seq.highTierSecond / seq.totalHighTier;
-    let thirdPct = seq.highTierThird / seq.totalHighTier;
-    
-    let highTierBonus = 0;
-    if (firstPct > 0.3) highTierBonus = 0.5;
-    else if (firstPct > 0.15) highTierBonus = 0.3;
-    else if (secondPct > 0.3) highTierBonus = 0.2;
-    else if (thirdPct > 0.3) highTierBonus = 0.1;
-    
-    weight = weight * (1 + highTierBonus);
-  }
-  
-  return Math.min(2.0, Math.max(0.8, weight));
 }
 
 function updateHitIntervals(){
@@ -1071,189 +1079,41 @@ function getButtonClass(heatType) {
   }
 }
 
-function calculateBaseProbability(totalRounds, actualHits, lastHit, current, multiplier) {
-  let expectedHits = totalRounds / multiplier;
-  let actualRate = actualHits > 0 ? totalRounds / actualHits : Infinity;
-  let expectedRate = multiplier;
-  let roundsSinceLastHit = lastHit ? current - lastHit : current;
-  let aheadBehind = actualHits - expectedHits;
+function getSequenceWeight(multiplier, currentGlobalDry, currentHighTierDry) {
+  let seq = sequencePatterns[multiplier];
+  if(!seq) return 1.0;
   
-  let baseProb = roundsSinceLastHit / expectedRate;
+  let weight = 1.0;
   
-  let modifier = 1;
-  if (aheadBehind > 0) {
-    modifier = 1 / (1 + aheadBehind * 0.15);
-  } else if (aheadBehind < 0) {
-    modifier = 1 + (Math.abs(aheadBehind) * 0.2);
-  }
-  
-  let actualRateImpact = 1;
-  if (actualHits > 0) {
-    let rateRatio = actualRate / expectedRate;
-    if (rateRatio < 1) {
-      actualRateImpact = Math.min(2.0, 1 / rateRatio);
-    } else {
-      actualRateImpact = Math.max(0.5, 1 / rateRatio);
-    }
-  }
-  
-  let finalProb = baseProb * modifier * actualRateImpact;
-  
-  let totalPossible = TOTAL_ROUNDS / multiplier;
-  let remainingHits = totalPossible - actualHits;
-  let roundsRemaining = TOTAL_ROUNDS - current;
-  let expectedRemaining = roundsRemaining / multiplier;
-  
-  if (remainingHits > 0 && expectedRemaining > 0) {
-    let remainingRatio = remainingHits / expectedRemaining;
-    if (remainingRatio < 0.8) {
-      finalProb = finalProb * (1 + (1 - remainingRatio) * 0.2);
-    }
-  }
-  
-  let interval = hitIntervals[multiplier];
-  if (interval && interval.hitRounds.length >= 2) {
-    let avgGap = interval.avgGap;
-    let maxDry = interval.maxDryStreak || 0;
-    let currentDry = interval.currentDryStreak || 0;
+  if(currentGlobalDry > 100 && seq.totalGlobal > 0) {
+    let firstPct = seq.globalFirst / seq.totalGlobal;
+    let secondPct = seq.globalSecond / seq.totalGlobal;
+    let thirdPct = seq.globalThird / seq.totalGlobal;
     
-    if (avgGap > 0 && roundsSinceLastHit > 0) {
-      let intervalRatio = roundsSinceLastHit / avgGap;
-      if (intervalRatio > 0) {
-        let intervalProb = Math.min(1, intervalRatio);
-        finalProb = (finalProb + intervalProb) / 2;
-      }
-    }
+    let globalBonus = 0;
+    if (firstPct > 0.3) globalBonus = 0.5;
+    else if (firstPct > 0.15) globalBonus = 0.3;
+    else if (secondPct > 0.3) globalBonus = 0.2;
+    else if (thirdPct > 0.3) globalBonus = 0.1;
     
-    if (maxDry > 0 && currentDry > maxDry * 0.7) {
-      let dryBoost = 1 + ((currentDry / maxDry) * 0.3);
-      finalProb = finalProb * dryBoost;
-    }
+    weight = weight * (1 + globalBonus);
+  }
+  
+  if(currentHighTierDry > 200 && seq.totalHighTier > 0 && multiplier >= HIGH_TIER_THRESHOLD) {
+    let firstPct = seq.highTierFirst / seq.totalHighTier;
+    let secondPct = seq.highTierSecond / seq.totalHighTier;
+    let thirdPct = seq.highTierThird / seq.totalHighTier;
     
-    if (interval.burstPatterns && interval.burstPatterns.length > 0) {
-      let recentHits = interval.hitRounds.slice(-5);
-      if (recentHits.length >= 2) {
-        let recentGaps = [];
-        for (let i = 1; i < recentHits.length; i++) {
-          recentGaps.push(recentHits[i] - recentHits[i-1]);
-        }
-        let avgRecentGap = recentGaps.reduce((a,b) => a + b, 0) / recentGaps.length;
-        if (avgRecentGap < interval.avgGap * 0.3) {
-          finalProb = finalProb * 1.3;
-        }
-      }
-    }
+    let highTierBonus = 0;
+    if (firstPct > 0.3) highTierBonus = 0.5;
+    else if (firstPct > 0.15) highTierBonus = 0.3;
+    else if (secondPct > 0.3) highTierBonus = 0.2;
+    else if (thirdPct > 0.3) highTierBonus = 0.1;
+    
+    weight = weight * (1 + highTierBonus);
   }
   
-  finalProb = Math.min(99, Math.round(finalProb * 100));
-  if (totalRounds > 0 && finalProb < 1) finalProb = 1;
-  
-  return finalProb;
-}
-
-function calculateFinalProbability(totalRounds, actualHits, lastHit, current, multiplier) {
-  let baseProb = calculateBaseProbability(totalRounds, actualHits, lastHit, current, multiplier);
-  
-  let accResult = getAccuracyModifier(multiplier);
-  let accuracyModifier = accResult.modifier;
-  
-  let penaltyResult = getCumulativePenalty(multiplier, baseProb);
-  let penalty = penaltyResult.penalty;
-  
-  let catchupResult = getCatchupBonus(multiplier, lastHit, current);
-  let catchupBonus = catchupResult.bonus / 100;
-  let inCatchup = catchupResult.inCatchup;
-  
-  // Calculate dry spell durations for sequence weight
-  let interval = hitIntervals[multiplier];
-  let globalDry = 0;
-  let highTierDry = 0;
-  
-  // Get last global hit
-  let lastGlobalHit = 0;
-  let lastHighTierHit = 0;
-  let entryIndex = 0;
-  for(let i = 0; i < entries.length; i++) {
-    let entry = entries[i];
-    if(entry.multi !== null) {
-      lastGlobalHit = entry.round;
-      if(entry.multi >= HIGH_TIER_THRESHOLD) {
-        lastHighTierHit = entry.round;
-      }
-    }
-  }
-  
-  globalDry = lastGlobalHit ? current - lastGlobalHit : current;
-  highTierDry = lastHighTierHit ? current - lastHighTierHit : current;
-  
-  let sequenceWeight = getSequenceWeight(multiplier, globalDry, highTierDry);
-  
-  let finalProb = baseProb * accuracyModifier * (1 - penalty) * sequenceWeight;
-  
-  if (inCatchup) {
-    finalProb = finalProb * (1 + catchupBonus);
-  }
-  
-  if (interval && interval.burstPatterns && interval.burstPatterns.length > 0) {
-    let hitRounds = interval.hitRounds;
-    if (hitRounds.length >= 3) {
-      let lastThree = hitRounds.slice(-3);
-      let gaps = [];
-      for (let i = 1; i < lastThree.length; i++) {
-        gaps.push(lastThree[i] - lastThree[i-1]);
-      }
-      if (gaps.length === 2 && gaps[0] < interval.avgGap * 0.2 && gaps[1] < interval.avgGap * 0.2) {
-        finalProb = finalProb * 1.2;
-      }
-    }
-  }
-  
-  finalProb = Math.min(99, Math.round(finalProb));
-  if (totalRounds > 0 && finalProb < 1) finalProb = 1;
-  
-  // Determine sequence position for display
-  let seqPos = '';
-  let seqType = '';
-  if (sequenceWeight > 1.4) {
-    seqPos = '🔮 1st in line';
-    seqType = 'Global Dry';
-  } else if (sequenceWeight > 1.2) {
-    seqPos = '🔮 2nd in line';
-    seqType = 'Global Dry';
-  } else if (sequenceWeight > 1.05) {
-    seqPos = '🔮 3rd in line';
-    seqType = 'Global Dry';
-  }
-  
-  // Check high-tier specific sequence
-  if (multiplier >= HIGH_TIER_THRESHOLD) {
-    let highSeq = sequencePatterns[multiplier];
-    if (highSeq && highSeq.totalHighTier > 0) {
-      let firstPct = highSeq.highTierFirst / highSeq.totalHighTier;
-      if (firstPct > 0.3 && highTierDry > 500) {
-        seqPos = '🔮 High-Tier 1st';
-        seqType = '500x+ Dry';
-      }
-    }
-  }
-  
-  return {
-    probability: finalProb,
-    baseProb: baseProb,
-    accuracyModifier: accuracyModifier,
-    penalty: penalty,
-    streak: penaltyResult.streak,
-    streakType: penaltyResult.streakType,
-    accCount: accResult.count,
-    accAccuracy: accResult.accuracy || 0,
-    inCatchup: inCatchup,
-    catchupBonus: Math.round(catchupBonus * 100),
-    sequenceWeight: sequenceWeight,
-    sequencePosition: seqPos,
-    sequenceType: seqType,
-    globalDry: globalDry,
-    highTierDry: highTierDry
-  };
+  return Math.min(2.0, Math.max(0.8, weight));
 }
 
 function getBarsAndColor(percentage) {
@@ -1304,8 +1164,7 @@ function render(){
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
-    let probResult = calculateFinalProbability(total, actualHits, lastHit, current, m);
-    let probability = probResult.probability;
+    let probability = calculateSeedProbability(total, actualHits, lastHit, current, m);
     
     let barResult = getBarsAndColor(probability);
     let bars = barResult.bars;
@@ -1327,25 +1186,28 @@ function render(){
     else if (probability <= 85) likelihood = 'Very Likely';
     else likelihood = 'Almost Certain';
     
+    let accResult = getAccuracyModifier(m);
     let accText = '';
-    if (probResult.accCount >= 3) {
-      accText = `📊 ${probResult.accAccuracy}% acc (${probResult.accCount})`;
-    } else if (probResult.accCount > 0) {
-      accText = `🧠 Learning... (${probResult.accCount})`;
+    if (accResult.count >= 3) {
+      accText = `📊 ${accResult.accuracy}% acc (${accResult.count})`;
+    } else if (accResult.count > 0) {
+      accText = `🧠 Learning... (${accResult.count})`;
     }
     
+    let penaltyResult = getCumulativePenalty(m, probability);
     let streakText = '';
-    if (probResult.streak >= 2) {
-      if (probResult.streakType === 'miss') {
-        streakText = `🔥 Miss: ${probResult.streak}`;
-      } else if (probResult.streakType === 'hit') {
-        streakText = `✅ Hit: ${probResult.streak}`;
+    if (penaltyResult.streak >= 2) {
+      if (penaltyResult.streakType === 'miss') {
+        streakText = `🔥 Miss: ${penaltyResult.streak}`;
+      } else if (penaltyResult.streakType === 'hit') {
+        streakText = `✅ Hit: ${penaltyResult.streak}`;
       }
     }
     
+    let catchupResult = getCatchupBonus(m, lastHit, current);
     let catchupText = '';
-    if (probResult.inCatchup) {
-      catchupText = `📈 Catch-up +${probResult.catchupBonus}%`;
+    if (catchupResult.inCatchup) {
+      catchupText = `📈 Catch-up +${catchupResult.bonus}%`;
     }
     
     let interval = hitIntervals[m];
@@ -1357,8 +1219,47 @@ function render(){
       }
     }
     
-    let seqText = probResult.sequencePosition;
-    let seqTypeText = probResult.sequenceType ? ` (${probResult.sequenceType})` : '';
+    // Get sequence info
+    let lastGlobalHit = 0;
+    let lastHighTierHit = 0;
+    for(let i = 0; i < entries.length; i++) {
+      let entry = entries[i];
+      if(entry.multi !== null) {
+        lastGlobalHit = entry.round;
+        if(entry.multi >= HIGH_TIER_THRESHOLD) {
+          lastHighTierHit = entry.round;
+        }
+      }
+    }
+    
+    let globalDry = lastGlobalHit ? current - lastGlobalHit : current;
+    let highTierDry = lastHighTierHit ? current - lastHighTierHit : current;
+    
+    let seqWeight = getSequenceWeight(m, globalDry, highTierDry);
+    let seqText = '';
+    let seqTypeText = '';
+    if (seqWeight > 1.4) {
+      seqText = '🔮 1st in line';
+      seqTypeText = '(Global Dry)';
+    } else if (seqWeight > 1.2) {
+      seqText = '🔮 2nd in line';
+      seqTypeText = '(Global Dry)';
+    } else if (seqWeight > 1.05) {
+      seqText = '🔮 3rd in line';
+      seqTypeText = '(Global Dry)';
+    }
+    
+    // Check high-tier specific
+    if (m >= HIGH_TIER_THRESHOLD) {
+      let seq = sequencePatterns[m];
+      if (seq && seq.totalHighTier > 0) {
+        let firstPct = seq.highTierFirst / seq.totalHighTier;
+        if (firstPct > 0.3 && highTierDry > 500) {
+          seqText = '🔮 High-Tier 1st';
+          seqTypeText = '(500x+ Dry)';
+        }
+      }
+    }
     
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})" data-multiplier="${m}">
@@ -1370,13 +1271,12 @@ function render(){
         <span class="button-sub">${likelihood} in next 200 rounds</span>
         <span class="button-sub">${dryText}</span>
         <span class="accuracy-badge">${accText} ${streakText} ${catchupText}</span>
-        <span class="dry-type-badge">${seqText}${seqTypeText}</span>
+        <span class="dry-type-badge">${seqText} ${seqTypeText}</span>
       </button>
     `;
   });
   document.getElementById("buttons").innerHTML = buttonHtml;
 
-  // Render dashboard cards
   let html = "";
 
   if(entries.length > 0) {
@@ -1395,6 +1295,7 @@ function render(){
         <span class="range-badge">📊 ${Object.keys(hitIntervals).filter(m => hitIntervals[m].hitRounds.length >= 2).length} multipliers with interval data</span>
         <span class="range-badge">🌍 Global Dry: ${globalStats.total || 0} (${globalStats.threshold || 600}+ rounds)</span>
         <span class="range-badge">📈 High-Tier Dry: ${highTierStats.total || 0} (${highTierStats.threshold || 1900}+ rounds)</span>
+        <span class="range-badge">🧠 Seed Mode: Max dry = expected × ${SEED_MAX_DRY_MULTIPLIER}</span>
       </div>
     `;
   }
@@ -1495,6 +1396,9 @@ function render(){
       }
       seqDisplay = parts.join(' | ');
     }
+    
+    // Seed info for card
+    let seedMaxDry = Math.round(expected * SEED_MAX_DRY_MULTIPLIER);
 
     html += `
       <div class="card">
@@ -1535,6 +1439,10 @@ function render(){
         
         <div class="stats-row small">
           <span>Sequence: <b>${seqDisplay || 'No data'}</b></span>
+        </div>
+        
+        <div class="stats-row small">
+          <span>Seed Max Dry: <b>${seedMaxDry}</b></span>
         </div>
         
         <div class="stats-row">
