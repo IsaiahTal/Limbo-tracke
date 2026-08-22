@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 65px;
+  min-height: 75px;
   position: relative;
   overflow: hidden;
 }
@@ -54,23 +54,6 @@ button:active {
   opacity: 0.7 !important;
 }
 
-button .ripple {
-  position: absolute;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
-  transform: scale(0);
-  animation: ripple-animation 0.6s ease-out;
-  pointer-events: none;
-}
-
-@keyframes ripple-animation {
-  to {
-    transform: scale(4);
-    opacity: 0;
-  }
-}
-
-/* Button click flash animation */
 .button-clicked {
   animation: button-flash 0.4s ease;
 }
@@ -82,7 +65,6 @@ button .ripple {
   100% { transform: scale(1); }
 }
 
-/* Button bounce animation for hit confirmation */
 .button-hit {
   animation: button-hit 0.5s ease;
 }
@@ -246,14 +228,22 @@ button .ripple {
   margin-top: 3px;
   width: 100%;
   justify-content: center;
+  align-items: center;
 }
 
 .bar {
   width: 14px;
-  height: 4px;
+  height: 6px;
   border-radius: 2px;
   background: #1f2937;
   transition: all 0.3s ease;
+}
+
+.bar-percentage {
+  font-size: 9px;
+  opacity: 0.8;
+  margin-top: 2px;
+  font-weight: bold;
 }
 
 /* NOT DUE BARS - Red spectrum (cold to hot) */
@@ -272,6 +262,11 @@ button .ripple {
 
 /* EMPTY BARS */
 .bar-empty { background: #1f2937; }
+
+/* Percentage text colors */
+.pct-notdue { color: #ef4444; }
+.pct-due { color: #22c55e; }
+.pct-verydue { color: #facc15; }
 </style>
 </head>
 
@@ -379,17 +374,14 @@ function addEntry(hitMulti){
 }
 
 function animateButton(multiplier){
-  // Find the button with the clicked multiplier
   let buttons = document.querySelectorAll('.grid button');
   buttons.forEach(btn => {
-    // Check if this button corresponds to the clicked multiplier
     let label = btn.querySelector('.button-label');
     if (label) {
       let btnText = label.textContent;
       let btnMulti = parseInt(btnText.replace('k', '000').replace('x', ''));
       if (btnMulti === multiplier) {
         btn.classList.remove('button-hit');
-        // Trigger reflow
         void btn.offsetWidth;
         btn.classList.add('button-hit');
       }
@@ -423,7 +415,7 @@ function buildStats(){
       misses: 0,
       totalRounds: 0,
       lastHit: 0,
-      hitRounds: [] // Store rounds when this multiplier hit
+      hitRounds: []
     };
   });
 
@@ -506,39 +498,41 @@ function getButtonClass(heatType) {
 }
 
 function getBars(roundsSinceLastHit, minGap, maxGap, multiplier) {
-  // If no data yet, use expected rate
   if (minGap === null) {
     let expectedGap = multiplier;
     let ratio = roundsSinceLastHit / expectedGap;
     
     if (ratio >= 1) {
-      // Due
-      let duePercent = Math.min(99, (ratio) * 100);
+      let duePercent = Math.min(99, Math.round((ratio) * 100));
       let bars = Math.min(5, Math.floor(duePercent / 20) + 1);
       let barClass = 'bar-due-';
-      return { bars, barClass, isDue: true };
+      let pctClass = 'pct-due';
+      let status = 'Due';
+      return { bars, barClass, pctClass, percentage: duePercent, status };
     } else {
-      // Not Due
-      let notDuePercent = Math.min(99, (1 - ratio) * 100);
+      let notDuePercent = Math.min(99, Math.round((1 - ratio) * 100));
       let bars = Math.min(5, Math.floor(notDuePercent / 20) + 1);
       let barClass = 'bar-notdue-';
-      return { bars, barClass, isDue: false };
+      let pctClass = 'pct-notdue';
+      let status = 'Not Due';
+      return { bars, barClass, pctClass, percentage: notDuePercent, status };
     }
   }
   
-  // Use dynamic data
   if (roundsSinceLastHit >= minGap) {
-    // DUE - Green/Yellow bars
-    let duePercent = Math.min(99, ((roundsSinceLastHit - minGap) / minGap) * 100 + 10);
+    let duePercent = Math.min(99, Math.round(((roundsSinceLastHit - minGap) / minGap) * 100 + 10));
     let bars = Math.min(5, Math.floor(duePercent / 20) + 1);
     let barClass = 'bar-due-';
-    return { bars, barClass, isDue: true };
+    let pctClass = duePercent >= 70 ? 'pct-verydue' : 'pct-due';
+    let status = duePercent >= 70 ? 'Very Due' : 'Due';
+    return { bars, barClass, pctClass, percentage: duePercent, status };
   } else {
-    // NOT DUE - Red bars
-    let notDuePercent = Math.min(99, ((minGap - roundsSinceLastHit) / minGap) * 100);
+    let notDuePercent = Math.min(99, Math.round(((minGap - roundsSinceLastHit) / minGap) * 100));
     let bars = Math.min(5, Math.floor(notDuePercent / 20) + 1);
     let barClass = 'bar-notdue-';
-    return { bars, barClass, isDue: false };
+    let pctClass = 'pct-notdue';
+    let status = 'Not Due';
+    return { bars, barClass, pctClass, percentage: notDuePercent, status };
   }
 }
 
@@ -549,7 +543,6 @@ function render(){
   document.getElementById("roundText").innerText = current;
   document.getElementById("entryCount").innerText = entries.length;
 
-  // Update buttons with heat map colors AND bars
   let buttonHtml = "";
   multipliers.forEach(m=>{
     let total = data[m].totalRounds;
@@ -562,21 +555,19 @@ function render(){
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
-    // Calculate gaps
     let gaps = getHitGaps(hitRounds);
     let minGap = gaps.min;
     let maxGap = gaps.max;
     
-    // Calculate rounds since last hit
     let roundsSinceLastHit = lastHit ? current - lastHit : current;
     
-    // Get bars
     let barResult = getBars(roundsSinceLastHit, minGap, maxGap, m);
     let bars = barResult.bars;
     let barClass = barResult.barClass;
-    let isDue = barResult.isDue;
+    let percentage = barResult.percentage;
+    let pctClass = barResult.pctClass;
+    let status = barResult.status;
     
-    // Build bar HTML
     let barHtml = '';
     for (let i = 0; i < 5; i++) {
       let filled = i < bars ? barClass + (i + 1) : 'bar-empty';
@@ -589,12 +580,12 @@ function render(){
         <div class="bar-container">
           ${barHtml}
         </div>
+        <span class="bar-percentage ${pctClass}">${percentage}% ${status}</span>
       </button>
     `;
   });
   document.getElementById("buttons").innerHTML = buttonHtml;
 
-  // Render dashboard cards
   let html = "";
 
   if(entries.length > 0) {
@@ -678,7 +669,6 @@ function render(){
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
-    // Calculate gaps for display
     let gaps = getHitGaps(hitRounds);
     let gapDisplay = gaps.min !== null ? `${gaps.min}-${gaps.max}` : 'No data';
 
@@ -742,7 +732,6 @@ function createButtons(){
   document.getElementById("buttons").innerHTML = html;
 }
 
-// Enter key support
 document.getElementById("roundInput").addEventListener("keypress", function(e) {
   if (e.key === "Enter") {
     addRoundOnly();
