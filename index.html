@@ -38,7 +38,7 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 95px;
+  min-height: 115px;
   position: relative;
   overflow: hidden;
   transform-origin: center;
@@ -231,7 +231,7 @@ button:active {
 }
 
 .button-sub {
-  font-size: 9px;
+  font-size: 8px;
   opacity: 0.6;
   margin-top: 1px;
   text-align: center;
@@ -319,6 +319,7 @@ button:active {
 <div id="dashboard"></div>
 
 <script>
+const TOTAL_ROUNDS = 500000;
 let multipliers = [
 200,300,400,500,600,700,800,900,1000,
 1500,2000,3000,4000,5000,
@@ -368,6 +369,7 @@ function addRoundOnly(){
   let r = parseInt(document.getElementById("roundInput").value);
   if(!r) return alert("Enter round number");
   if(r <= 0) return alert("Round must be greater than 0");
+  if(r > TOTAL_ROUNDS) return alert("Round cannot exceed " + TOTAL_ROUNDS);
   
   if(entries.some(e => e.round === r)) {
     return alert("Round " + r + " already exists! Delete it first or use a different round.");
@@ -385,6 +387,7 @@ function addEntry(hitMulti){
   let r = parseInt(document.getElementById("roundInput").value);
   if(!r) return alert("Enter round number");
   if(r <= 0) return alert("Round must be greater than 0");
+  if(r > TOTAL_ROUNDS) return alert("Round cannot exceed " + TOTAL_ROUNDS);
   
   if(entries.some(e => e.round === r)) {
     return alert("Round " + r + " already exists! Delete it first or use a different round.");
@@ -412,31 +415,26 @@ function recordPredictions(round){
     let lastHit = data[m].lastHit;
     let hitRounds = data[m].hitRounds;
     
-    let probability = calculateHitProbability(total, actualHits, lastHit, current, m, null);
+    let probability = calculateBaseProbability(total, actualHits, lastHit, current, m);
     
     predictionHistory.push({
       multiplier: m,
       round: round,
       prediction: probability,
-      actualHit: false, // Will be updated when we know
+      actualHit: false,
       checked: false
     });
   });
 }
 
 function updatePredictions(currentRound){
-  // For each prediction, check if it hit within 200 rounds
   predictionHistory.forEach(pred => {
     if (!pred.checked && pred.round <= currentRound) {
-      // Check if this multiplier hit between pred.round and pred.round + 200
       let hitFound = false;
       
-      // Look through entries to see if this multiplier hit within 200 rounds
       for (let i = 0; i < entries.length; i++) {
         let entry = entries[i];
         if (entry.round >= pred.round && entry.round <= pred.round + 200) {
-          // Check if this entry represents a hit for this multiplier
-          // (entry.multi >= pred.multiplier means this multiplier hit)
           if (entry.multi !== null && entry.multi >= pred.multiplier) {
             hitFound = true;
             break;
@@ -449,50 +447,110 @@ function updatePredictions(currentRound){
     }
   });
   
-  // Clean up old predictions (keep last 1000)
-  if (predictionHistory.length > 1000) {
-    predictionHistory = predictionHistory.slice(-1000);
+  if (predictionHistory.length > 2000) {
+    predictionHistory = predictionHistory.slice(-2000);
   }
   
   save();
 }
 
 function getAccuracyModifier(multiplier) {
-  // Get all predictions for this multiplier
   let preds = predictionHistory.filter(p => p.multiplier === multiplier && p.checked);
   
-  if (preds.length < 5) return 1.0; // Not enough data yet
+  if (preds.length < 5) return { modifier: 1.0, count: preds.length };
   
-  // Calculate accuracy
-  let totalError = 0;
-  let count = 0;
-  
+  let correct = 0;
   preds.forEach(pred => {
-    // If predicted 80% and hit → good (error = 0)
-    // If predicted 80% and didn't hit → bad (error = 0.8)
-    let error = 0;
-    if (pred.actualHit) {
-      error = 1 - (pred.prediction / 100); // How far off from 100%
-    } else {
-      error = pred.prediction / 100; // How far off from 0%
-    }
-    totalError += error;
-    count++;
+    let predictedHigh = pred.prediction >= 50;
+    if (predictedHigh && pred.actualHit) correct++;
+    else if (!predictedHigh && !pred.actualHit) correct++;
   });
   
-  let avgError = totalError / count;
-  
-  // Calculate modifier based on accuracy
-  // If avgError is high (bad at predicting), adjust more
-  // If avgError is low (good at predicting), adjust less
-  
-  // Target: If predictions are consistently wrong, adjust by up to 30%
-  let modifier = 1 + (avgError - 0.3) * 0.8;
-  
-  // Clamp modifier between 0.6 and 1.4
+  let accuracy = correct / preds.length;
+  let modifier = 1 + (accuracy - 0.5) * 0.6;
   modifier = Math.max(0.6, Math.min(1.4, modifier));
   
-  return modifier;
+  return { modifier: modifier, count: preds.length, accuracy: Math.round(accuracy * 100) };
+}
+
+function getCumulativePenalty(multiplier, currentPrediction) {
+  let preds = predictionHistory.filter(p => p.multiplier === multiplier && p.checked);
+  
+  if (preds.length < 3) return { penalty: 0, streak: 0 };
+  
+  // Check recent predictions (last 10)
+  let recent = preds.slice(-10);
+  
+  let missCount = 0;
+  let hitCount = 0;
+  let consecutiveMiss = 0;
+  let consecutiveHit = 0;
+  let currentStreak = 0;
+  
+  // Check for consecutive misses on high predictions
+  for (let i = recent.length - 1; i >= 0; i--) {
+    let pred = recent[i];
+    if (pred.prediction >= 70 && !pred.actualHit) {
+      consecutiveMiss++;
+    } else {
+      break;
+    }
+  }
+  
+  // Check for consecutive hits on low predictions
+  for (let i = recent.length - 1; i >= 0; i--) {
+    let pred = recent[i];
+    if (pred.prediction <= 30 && pred.actualHit) {
+      consecutiveHit++;
+    } else {
+      break;
+    }
+  }
+  
+  // Count total misses for high predictions
+  let highMisses = preds.filter(p => p.prediction >= 70 && !p.actualHit).length;
+  let lowHits = preds.filter(p => p.prediction <= 30 && p.actualHit).length;
+  
+  let penalty = 0;
+  let streak = 0;
+  let streakType = '';
+  
+  // If high predictions are missing frequently
+  if (consecutiveMiss >= 2 && currentPrediction >= 70) {
+    penalty = Math.min(0.5, consecutiveMiss * 0.08);
+    streak = consecutiveMiss;
+    streakType = 'miss';
+  }
+  
+  // If low predictions are hitting frequently
+  if (consecutiveHit >= 2 && currentPrediction <= 30) {
+    penalty = Math.min(0.5, consecutiveHit * 0.08);
+    streak = consecutiveHit;
+    streakType = 'hit';
+  }
+  
+  // Add historical penalty for high misses
+  if (highMisses > 3 && currentPrediction >= 70) {
+    let extraPenalty = Math.min(0.3, highMisses * 0.02);
+    penalty = Math.max(penalty, extraPenalty);
+  }
+  
+  // Add bonus for low hits
+  if (lowHits > 3 && currentPrediction <= 30) {
+    let extraBonus = Math.min(0.3, lowHits * 0.02);
+    penalty = penalty - extraBonus; // Negative penalty = bonus
+  }
+  
+  // Clamp penalty
+  penalty = Math.max(-0.4, Math.min(0.5, penalty));
+  
+  return { 
+    penalty: penalty, 
+    streak: streak,
+    streakType: streakType,
+    highMisses: highMisses,
+    lowHits: lowHits
+  };
 }
 
 function animateButton(multiplier){
@@ -627,60 +685,83 @@ function getButtonClass(heatType) {
   }
 }
 
-function calculateHitProbability(totalRounds, actualHits, lastHit, current, multiplier, accuracyModifier) {
-  if (accuracyModifier === undefined || accuracyModifier === null) {
-    accuracyModifier = 1.0;
-  }
-  
-  // Calculate expected hits
+function calculateBaseProbability(totalRounds, actualHits, lastHit, current, multiplier) {
   let expectedHits = totalRounds / multiplier;
-  
-  // Calculate actual rate
   let actualRate = actualHits > 0 ? totalRounds / actualHits : Infinity;
   let expectedRate = multiplier;
-  
-  // Calculate rounds since last hit
   let roundsSinceLastHit = lastHit ? current - lastHit : current;
-  
-  // Calculate ahead/behind
   let aheadBehind = actualHits - expectedHits;
   
-  // Step 1: Base probability from rounds since last hit vs expected rate
+  // Base probability from rounds since last hit
   let baseProb = roundsSinceLastHit / expectedRate;
   
-  // Step 2: Calculate ahead/behind modifier
+  // Ahead/Behind modifier
   let modifier = 1;
   if (aheadBehind > 0) {
-    // Ahead - reduces probability
     modifier = 1 / (1 + aheadBehind * 0.25);
   } else if (aheadBehind < 0) {
-    // Behind - increases probability
     modifier = 1 + (Math.abs(aheadBehind) * 0.4);
   }
   
-  // Step 3: Actual rate impact
+  // Actual rate impact
   let actualRateImpact = 1;
   if (actualHits > 0) {
     let rateRatio = actualRate / expectedRate;
     if (rateRatio < 1) {
-      // Hitting more often than expected - higher probability
       actualRateImpact = Math.min(2.0, 1 / rateRatio);
     } else {
-      // Hitting less often than expected - lower probability
       actualRateImpact = Math.max(0.5, 1 / rateRatio);
     }
   }
   
-  // Step 4: Calculate final probability percentage
-  let finalProb = baseProb * modifier * actualRateImpact * accuracyModifier;
+  let finalProb = baseProb * modifier * actualRateImpact;
   
-  // Convert to percentage and cap at 99%
+  // Consider remaining hits in 500k rounds
+  let totalPossible = TOTAL_ROUNDS / multiplier;
+  let remainingHits = totalPossible - actualHits;
+  let roundsRemaining = TOTAL_ROUNDS - current;
+  let expectedRemaining = roundsRemaining / multiplier;
+  
+  // If remaining hits is low, probability increases
+  if (remainingHits > 0 && expectedRemaining > 0) {
+    let remainingRatio = remainingHits / expectedRemaining;
+    if (remainingRatio < 0.8) {
+      finalProb = finalProb * (1 + (1 - remainingRatio) * 0.3);
+    }
+  }
+  
   finalProb = Math.min(99, Math.round(finalProb * 100));
-  
-  // Ensure minimum 1% if there's any data
   if (totalRounds > 0 && finalProb < 1) finalProb = 1;
   
   return finalProb;
+}
+
+function calculateFinalProbability(totalRounds, actualHits, lastHit, current, multiplier) {
+  let baseProb = calculateBaseProbability(totalRounds, actualHits, lastHit, current, multiplier);
+  
+  // Apply accuracy modifier
+  let accResult = getAccuracyModifier(multiplier);
+  let accuracyModifier = accResult.modifier;
+  
+  // Apply cumulative penalty/bonus
+  let penaltyResult = getCumulativePenalty(multiplier, baseProb);
+  let penalty = penaltyResult.penalty;
+  
+  let finalProb = baseProb * accuracyModifier * (1 - penalty);
+  
+  finalProb = Math.min(99, Math.round(finalProb));
+  if (totalRounds > 0 && finalProb < 1) finalProb = 1;
+  
+  return {
+    probability: finalProb,
+    baseProb: baseProb,
+    accuracyModifier: accuracyModifier,
+    penalty: penalty,
+    streak: penaltyResult.streak,
+    streakType: penaltyResult.streakType,
+    accCount: accResult.count,
+    accAccuracy: accResult.accuracy || 0
+  };
 }
 
 function getBarsAndColor(percentage) {
@@ -689,11 +770,9 @@ function getBarsAndColor(percentage) {
   let pctClass = '';
   
   if (percentage <= 50) {
-    // Low probability - Red spectrum
     barClass = 'bar-red-';
     pctClass = 'pct-low';
   } else {
-    // High probability - Green/Yellow spectrum
     barClass = 'bar-green-';
     if (percentage <= 70) {
       pctClass = 'pct-medium';
@@ -707,7 +786,6 @@ function getBarsAndColor(percentage) {
 
 function render(){
 
-  // First, update predictions with current data
   if (entries.length > 0) {
     let current = entries[entries.length - 1].round;
     updatePredictions(current);
@@ -730,13 +808,17 @@ function render(){
     let label = m >= 10000 ? (m/1000) + 'k' : m + 'x';
     if (m === 100000) label = '100k';
     
-    // Get accuracy modifier based on past performance
-    let accuracyModifier = getAccuracyModifier(m);
+    // Calculate final probability with all learning
+    let probResult = calculateFinalProbability(total, actualHits, lastHit, current, m);
+    let probability = probResult.probability;
     
-    // Calculate hit probability with learning
-    let probability = calculateHitProbability(total, actualHits, lastHit, current, m, accuracyModifier);
+    // Calculate remaining hits
+    let totalPossible = Math.round(TOTAL_ROUNDS / m);
+    let remainingHits = totalPossible - actualHits;
+    let roundsRemaining = TOTAL_ROUNDS - current;
+    let expectedRemaining = Math.round(roundsRemaining / m);
     
-    // Get bars and colors based on probability
+    // Get bars and colors
     let barResult = getBarsAndColor(probability);
     let bars = barResult.bars;
     let barClass = barResult.barClass;
@@ -748,7 +830,7 @@ function render(){
       barHtml += `<div class="bar ${filled}"></div>`;
     }
     
-    // Determine likelihood description
+    // Likelihood description
     let likelihood = '';
     if (probability <= 10) likelihood = 'Very Unlikely';
     else if (probability <= 25) likelihood = 'Unlikely';
@@ -758,30 +840,27 @@ function render(){
     else if (probability <= 85) likelihood = 'Very Likely';
     else likelihood = 'Almost Certain';
     
-    // Get accuracy info
-    let preds = predictionHistory.filter(p => p.multiplier === m && p.checked);
-    let accuracyText = '';
-    if (preds.length >= 5) {
-      let correct = preds.filter(p => {
-        // Check if prediction was within 20% of actual
-        let predictedHigh = p.prediction >= 60;
-        if (predictedHigh && p.actualHit) return true;
-        if (!predictedHigh && !p.actualHit) return true;
-        return false;
-      }).length;
-      let accuracy = Math.round((correct / preds.length) * 100);
-      accuracyText = `📊 ${accuracy}% accuracy (${preds.length} predictions)`;
-    } else if (preds.length > 0) {
-      accuracyText = `📊 Learning... (${preds.length}/5 predictions)`;
+    // Accuracy info
+    let accText = '';
+    if (probResult.accCount >= 5) {
+      accText = `📊 ${probResult.accAccuracy}% acc (${probResult.accCount} preds)`;
+    } else if (probResult.accCount > 0) {
+      accText = `🧠 Learning... (${probResult.accCount}/5)`;
     }
     
-    // Show modifier if active
-    let modifierText = '';
-    if (accuracyModifier !== 1.0 && preds.length >= 5) {
-      let mod = (accuracyModifier - 1) * 100;
-      if (mod > 0) modifierText = `⬆️ +${Math.round(mod)}% adjusted`;
-      else modifierText = `⬇️ ${Math.round(mod)}% adjusted`;
+    // Streak info
+    let streakText = '';
+    if (probResult.streak >= 2) {
+      if (probResult.streakType === 'miss') {
+        streakText = `🔥 Miss streak: ${probResult.streak}`;
+      } else if (probResult.streakType === 'hit') {
+        streakText = `✅ Hit streak: ${probResult.streak}`;
+      }
     }
+    
+    // Remaining info
+    let remainingText = `📌 ${remainingHits}/${totalPossible} remaining`;
+    if (remainingHits < 0) remainingText = `📌 All ${totalPossible} hits used`;
     
     buttonHtml += `
       <button class="${btnClass}" onclick="addEntry(${m})" data-multiplier="${m}">
@@ -791,7 +870,8 @@ function render(){
         </div>
         <span class="bar-percentage ${pctClass}">${probability}%</span>
         <span class="button-sub">${likelihood} in next 200 rounds</span>
-        <span class="accuracy-badge">${accuracyText} ${modifierText}</span>
+        <span class="button-sub">${remainingText}</span>
+        <span class="accuracy-badge">${accText} ${streakText}</span>
       </button>
     `;
   });
@@ -809,6 +889,7 @@ function render(){
         ${current > 0 ? `<span class="range-badge">All rounds automatically counted</span>` : ''}
         ${predictionHistory.filter(p => p.checked).length > 0 ? 
           `<span class="range-badge">🧠 ${predictionHistory.filter(p => p.checked).length} predictions learned</span>` : ''}
+        <span class="range-badge">🎯 ${Math.round((current/TOTAL_ROUNDS)*100)}% of 500k rounds</span>
       </div>
     `;
   }
@@ -834,6 +915,9 @@ function render(){
     let aheadBehindClass = aheadBehind >= 0 ? "ahead" : "behind";
     let aheadBehindLabel = aheadBehind >= 0 ? "Ahead" : "Behind";
     let aheadBehindIcon = aheadBehind >= 0 ? "✅" : "🔴";
+    
+    let totalPossible = Math.round(TOTAL_ROUNDS / m);
+    let remainingHits = totalPossible - actualHits;
     
     let statusClass, statusLabel, statusIcon;
     if (total === 0) {
@@ -912,6 +996,11 @@ function render(){
         <div class="stats-row small">
           <span>Hit gaps: <b>${gapDisplay}</b></span>
           <span>Actual rate: <b>1/${actualRoundsPerHit}</b></span>
+        </div>
+        
+        <div class="stats-row small">
+          <span>Total possible: <b>${totalPossible}</b></span>
+          <span>Remaining: <b>${remainingHits}</b></span>
         </div>
         
         <div class="stats-row">
